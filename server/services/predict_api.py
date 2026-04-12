@@ -26,7 +26,7 @@ MODEL_PATH = os.path.join(BASE_DIR, 'm1_model', 'plant_model.h5')
 CLASSES_PATH = os.path.join(BASE_DIR, 'm1_model', 'classes.json')
 
 # ==================== OPENROUTER API KEY ====================
-OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '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')
+OPENROUTER_API_KEY = "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"
 
 SUPPORTED_CROPS = ['tomato', 'potato', 'bell pepper', 'pepper']
 
