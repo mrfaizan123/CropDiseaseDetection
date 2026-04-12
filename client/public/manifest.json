@@ -1,0 +1,21 @@
+{
+  "name": "FarmGuru: Crop & Farm Assistant",
+  "short_name": "FarmGuru",
+  "description": "Your ultimate AI crop disease detector, weather advisor, and mandi price tracker.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2c5f2d",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/2c5f2d/ffffff?text=FG",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://placehold.co/512x512/2c5f2d/ffffff?text=FG",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
