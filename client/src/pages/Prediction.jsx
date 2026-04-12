@@ -12,6 +12,13 @@ function Prediction() {
   const [speakingText, setSpeakingText] = useState(null);
   const [quickExplain, setQuickExplain] = useState({}); // Store quick explanations per result
   const [loadingExplain, setLoadingExplain] = useState({}); // Loading state per result
+  const [explainLang, setExplainLang] = useState('en'); // Language for explanation
+  
+  // Disease Q&A states
+  const [diseaseChat, setDiseaseChat] = useState({}); // Chat history per disease
+  const [diseaseChatInput, setDiseaseChatInput] = useState({});
+  const [loadingDiseaseChat, setLoadingDiseaseChat] = useState({});
+  
   const { isAuthenticated, user } = useAuth();
   const synthRef = useRef(window.speechSynthesis);
   const fileInputRef = useRef(null);
@@ -33,7 +40,13 @@ function Prediction() {
       .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '') // Symbols and pictographs extended
       .replace(/[\u{2600}-\u{26FF}]/gu, '') // Miscellaneous symbols
       .replace(/[\u{2700}-\u{27BF}]/gu, '') // Dingbats
-      .replace(/[^\w\s.,!?;:'"()-]/g, ' ') // Keep only word chars, spaces, and basic punctuation
+      .replace(/\*\*/g, '') // Remove markdown bold
+      .replace(/\*/g, '') // Remove markdown italics
+      .replace(/#{1,6}\s/g, '') // Remove headers
+      .replace(/\d+\.\s/g, ' ') // Remove numbered lists
+      .replace(/-\s/g, ' ') // Remove bullet lists
+      .replace(/\s+\(/g, '(') // Remove extra spaces before parenthesis
+      .replace(/[^\w\s.,!?;:()\n]/g, ' ') // Keep only word chars, spaces, and basic punctuation
       .replace(/\s+/g, ' ') // Replace multiple spaces with single space
       .trim();
   };
@@ -179,8 +192,8 @@ function Prediction() {
     
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.lang = lang;
-    utterance.rate = 0.9;
-    utterance.pitch = 1;
+    utterance.rate = lang === 'hi-IN' ? 0.8 : 0.85; // Slower for natural speech
+    utterance.pitch = lang === 'hi-IN' ? 1.1 : 1;
     utterance.volume = 1;
     
     utterance.onstart = () => setSpeakingText(id);
@@ -203,15 +216,20 @@ function Prediction() {
     try {
       const response = await API.post('/chatbot/quick-explain', {
         diseaseName: result.diseaseName,
+        cropName: result.className, // Use crop name from detection
         symptoms: result.symptoms,
         treatment: result.treatment,
         prevention: result.prevention,
         organicRemedy: result.organicRemedy,
+        location: 'Your farm location',
         language: language
       });
       
       if (response.data.success) {
         setQuickExplain(prev => ({ ...prev, [key]: response.data.reply }));
+        // Initialize disease chat for Q&A
+        initializeDiseaseChat(result.diseaseName, result.className);
+        // Auto-play speech
         setTimeout(() => {
           speakQuickExplain(response.data.reply, `quick-${key}`, language);
         }, 100);
@@ -221,11 +239,63 @@ function Prediction() {
     } catch (error) {
       console.error('Quick explain error:', error);
       const fallback = language === 'hi' 
-        ? `किसान भाई, ${result.diseaseName} है। ${result.treatment.substring(0, 120)} प्रभावित पत्तियों को हटा दें। समय पर इलाज से फसल बच सकती है।`
-        : `Dear farmer, your crop has ${result.diseaseName}. ${result.treatment.substring(0, 120)} Remove affected leaves. Timely action can save your crop.`;
+        ? `भाई, आपकी फसल में ${result.diseaseName} हुआ है। यह आमतौर पर नमी के कारण होता है। सही इलाज से ठीक हो जाएगी। ${result.treatment.substring(0, 100) || ''}`
+        : `Friend, your crop has ${result.diseaseName}. This usually happens in humid conditions. Proper treatment will fix it. ${result.treatment.substring(0, 100) || ''}`;
       setQuickExplain(prev => ({ ...prev, [key]: fallback }));
+      initializeDiseaseChat(result.diseaseName, result.className);
     } finally {
       setLoadingExplain(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
+  // Initialize disease Q&A chat
+  const initializeDiseaseChat = (diseaseName, cropName) => {
+    const chatKey = `${diseaseName}_chat`;
+    if (!diseaseChat[chatKey]) {
+      setDiseaseChat(prev => ({
+        ...prev,
+        [chatKey]: [{ role: 'system', msg: `Asking about ${diseaseName} on ${cropName}? Ask away! हिंदी या English में सवाल पूछें।` }]
+      }));
+    }
+  };
+
+  // Ask disease question
+  const askDiseaseQuestion = async (result, inputKey, language) => {
+    const question = diseaseChatInput[inputKey]?.trim();
+    if (!question) return;
+    
+    const chatKey = `${result.diseaseName}_chat`;
+    setLoadingDiseaseChat(prev => ({ ...prev, [chatKey]: true }));
+    setDiseaseChatInput(prev => ({ ...prev, [inputKey]: '' }));
+    
+    // Add user message to chat
+    setDiseaseChat(prev => ({
+      ...prev,
+      [chatKey]: [...(prev[chatKey] || []), { role: 'user', msg: question }]
+    }));
+    
+    try {
+      const response = await API.post('/chatbot/disease-qa', {
+        diseaseName: result.diseaseName,
+        cropName: result.className,
+        question: question,
+        language: language
+      });
+      
+      if (response.data.success) {
+        setDiseaseChat(prev => ({
+          ...prev,
+          [chatKey]: [...prev[chatKey], { role: 'assistant', msg: response.data.reply }]
+        }));
+      }
+    } catch (error) {
+      console.error('Disease QA error:', error);
+      setDiseaseChat(prev => ({
+        ...prev,
+        [chatKey]: [...prev[chatKey], { role: 'assistant', msg: language === 'hi' ? 'कृपया फिर से कोशिश करें।' : 'Please try again.' }]
+      }));
+    } finally {
+      setLoadingDiseaseChat(prev => ({ ...prev, [chatKey]: false }));
     }
   };
 
@@ -244,13 +314,16 @@ function Prediction() {
     
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.lang = language === 'hi' ? 'hi-IN' : 'en-US';
-    utterance.rate = language === 'hi' ? 0.85 : 0.9;
-    utterance.pitch = 1;
+    utterance.rate = language === 'hi' ? 0.8 : 0.85; // Slower, more natural speed
+    utterance.pitch = language === 'hi' ? 1.1 : 1; // Slightly higher pitch for Hindi
     utterance.volume = 1;
     
     utterance.onstart = () => setSpeakingText(id);
     utterance.onend = () => setSpeakingText(null);
-    utterance.onerror = () => setSpeakingText(null);
+    utterance.onerror = (e) => {
+      console.error('Speech error:', e);
+      setSpeakingText(null);
+    };
     
     synthRef.current.speak(utterance);
   };
@@ -513,49 +586,54 @@ function Prediction() {
                     display: 'flex',
                     gap: '15px',
                     flexWrap: 'wrap',
-                    alignItems: 'center'
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
                   }}>
                     <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#92400e' }}>
-                      ⚡ Need simple advice?
+                      ⚡ Get Simple & Farmer-Friendly Explanation:
                     </span>
-                    <button
-                      onClick={() => getQuickExplanation(result, 'en')}
-                      disabled={loadingExplain[engKey]}
-                      style={{
-                        padding: '8px 20px',
-                        background: '#2c5f2d',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '25px',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        opacity: loadingExplain[engKey] ? 0.6 : 1
-                      }}
-                    >
-                      {loadingExplain[engKey] ? '⏳' : '🇬🇧'} Tell me in English
-                    </button>
-                    <button
-                      onClick={() => getQuickExplanation(result, 'hi')}
-                      disabled={loadingExplain[hinKey]}
-                      style={{
-                        padding: '8px 20px',
-                        background: '#2c5f2d',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '25px',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        opacity: loadingExplain[hinKey] ? 0.6 : 1
-                      }}
-                    >
-                      {loadingExplain[hinKey] ? '⏳' : '🇮🇳'} हिंदी में बताएं
-                    </button>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button
+                        onClick={() => getQuickExplanation(result, 'en')}
+                        disabled={loadingExplain[engKey]}
+                        style={{
+                          padding: '8px 20px',
+                          background: loadingExplain[engKey] ? '#d1d5db' : '#3b82f6',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '25px',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          opacity: loadingExplain[engKey] ? 0.6 : 1,
+                          fontWeight: '600'
+                        }}
+                      >
+                        {loadingExplain[engKey] ? '⏳' : '🇬🇧'} English
+                      </button>
+                      <button
+                        onClick={() => getQuickExplanation(result, 'hi')}
+                        disabled={loadingExplain[hinKey]}
+                        style={{
+                          padding: '8px 20px',
+                          background: loadingExplain[hinKey] ? '#d1d5db' : '#f59e0b',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '25px',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          opacity: loadingExplain[hinKey] ? 0.6 : 1,
+                          fontWeight: '600'
+                        }}
+                      >
+                        {loadingExplain[hinKey] ? '⏳' : '🇮🇳'} हिंदी
+                      </button>
+                    </div>
                   </div>
 
                   {/* Quick Explanation Display */}
@@ -567,7 +645,7 @@ function Prediction() {
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                         <span style={{ fontWeight: 'bold', color: '#1e40af', fontSize: '14px' }}>
-                          {quickExplain[engKey] ? '💡 Simple Advice (English)' : '💡 सरल सलाह (हिंदी)'}
+                          {quickExplain[engKey] ? '� Farmer-Friendly Guidance (English)' : '💚 किसान के लिए सहायक मार्गदर्शन (हिंदी)'}
                         </span>
                         {(quickExplain[engKey] || quickExplain[hinKey]) && (
                           <button
@@ -589,15 +667,16 @@ function Prediction() {
                           </button>
                         )}
                       </div>
-                      <p style={{ 
+                      <div style={{ 
                         margin: 0, 
-                        fontSize: '15px', 
-                        lineHeight: '1.6', 
+                        fontSize: '14px', 
+                        lineHeight: '1.8', 
                         color: '#1f2937',
-                        whiteSpace: 'pre-wrap'
+                        whiteSpace: 'pre-wrap',
+                        fontFamily: '"Segoe UI", system-ui, sans-serif'
                       }}>
                         {quickExplain[engKey] || quickExplain[hinKey]}
-                      </p>
+                      </div>
                     </div>
                   )}
 
@@ -621,6 +700,78 @@ function Prediction() {
                         <span style={{ fontSize: '13px', color: '#4b5563' }}>
                           Getting simple explanation for you...
                         </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Disease Q&A Chat */}
+                  {(quickExplain[engKey] || quickExplain[hinKey]) && (
+                    <div style={{
+                      padding: '15px 20px',
+                      background: 'linear-gradient(135deg, #f3f0ff, #ede9fe)',
+                      borderBottom: '1px solid #e9d5ff',
+                      borderTop: '1px solid #e5e7eb'
+                    }}>
+                      <div style={{ fontWeight: 'bold', color: '#6b21a8', marginBottom: '12px', fontSize: '14px' }}>
+                        ❓ Ask Questions About {result.diseaseName}
+                      </div>
+                      <div style={{ maxHeight: '200px', overflowY: 'auto', background: 'white', borderRadius: '8px', padding: '12px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {diseaseChat[`${result.diseaseName}_chat`]?.map((msg, i) => (
+                          <div key={i} style={{
+                            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                            background: msg.role === 'user' ? '#6b21a8' : '#f3f0ff',
+                            color: msg.role === 'user' ? 'white' : '#4b0082',
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            maxWidth: '80%',
+                            fontSize: '13px',
+                            lineHeight: '1.4'
+                          }}>
+                            {msg.msg}
+                          </div>
+                        ))}
+                        {loadingDiseaseChat[`${result.diseaseName}_chat`] && (
+                          <div style={{ alignSelf: 'flex-start', color: '#6b7280', fontSize: '12px' }}>
+                            Thinking...
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          type="text"
+                          placeholder={explainLang === 'hi' ? 'सवाल पूछें या हिंदी में लिखें...' : 'Ask your question...'}
+                          value={diseaseChatInput[`${result.diseaseName}_input`] || ''}
+                          onChange={(e) => setDiseaseChatInput(prev => ({ ...prev, [`${result.diseaseName}_input`]: e.target.value }))}
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              askDiseaseQuestion(result, `${result.diseaseName}_input`, explainLang);
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            borderRadius: '20px',
+                            border: '1px solid #d8b4fe',
+                            outline: 'none',
+                            fontSize: '13px'
+                          }}
+                        />
+                        <button
+                          onClick={() => askDiseaseQuestion(result, `${result.diseaseName}_input`, explainLang)}
+                          disabled={loadingDiseaseChat[`${result.diseaseName}_chat`]}
+                          style={{
+                            padding: '8px 16px',
+                            background: '#6b21a8',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '20px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            opacity: loadingDiseaseChat[`${result.diseaseName}_chat`] ? 0.6 : 1
+                          }}
+                        >
+                          {explainLang === 'hi' ? 'पूछें' : 'Ask'}
+                        </button>
                       </div>
                     </div>
                   )}

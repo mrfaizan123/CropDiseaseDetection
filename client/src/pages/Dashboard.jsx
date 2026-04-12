@@ -63,12 +63,15 @@ function Dashboard() {
   // Govt Schemes State
   const [govLang, setGovLang] = useState('hi'); // 'hi' or 'en'
   const [govSchemes, setGovSchemes] = useState('');
+  const [govPesticides, setGovPesticides] = useState('');
   const [loadingSchemes, setLoadingSchemes] = useState(false);
+  const [schemeTab, setSchemeTab] = useState('schemes'); // 'schemes' or 'pesticides'
 
   // Smart Crop Planning State
   const [planLang, setPlanLang] = useState('hi'); // 'hi' or 'en'
   const [cropInput, setCropInput] = useState('');
   const [smartPlan, setSmartPlan] = useState('');
+  const [smartPlanSummary, setSmartPlanSummary] = useState('');
   const [planLoading, setPlanLoading] = useState(false);
   const [planChatHistory, setPlanChatHistory] = useState([]);
   const [chatInput, setChatInput] = useState('');
@@ -82,6 +85,7 @@ function Dashboard() {
     fetchDashboardData();
     getUserLocation();
     fetchGovtSchemes(govLang);
+    fetchGovtPesticides(govLang);
   }, [isAuthenticated]);
 
   // Calendar Alarm System (Strict 12 hours / 5 times => Every 2.4 hrs check)
@@ -155,9 +159,18 @@ function Dashboard() {
     } catch (e) {} finally { setLoadingSchemes(false); }
   };
 
+  const fetchGovtPesticides = async (lang) => {
+    setLoadingSchemes(true);
+    try {
+      const res = await API.post('/chatbot/pesticides', { state: 'India', language: lang });
+      if (res.data.success) setGovPesticides(res.data.pesticides);
+    } catch (e) {} finally { setLoadingSchemes(false); }
+  };
+
   const handleGovLangSwitch = (lang) => {
     setGovLang(lang);
     fetchGovtSchemes(lang);
+    fetchGovtPesticides(lang);
   };
 
   const getUserLocation = () => {
@@ -232,8 +245,10 @@ function Dashboard() {
         crop: cropInput, location: weather?.city || 'India', language: planLang
       });
       if (res.data.success) {
-        setSmartPlan(res.data.plan);
-        setPlanChatHistory([{ role: 'system', msg: `Start of plan chat for ${cropInput}. Ask anything!` }]);
+        setSmartPlanSummary(res.data.summary || '');
+        setSmartPlan(res.data.plan || res.data.fullPlan); // Use fullPlan for backward compatibility
+        setPlanChatHistory([{ role: 'system', msg: `Questions about ${cropInput}? Ask anything in ${planLang === 'hi' ? 'Hindi or English!' : 'English!'}` }]);
+        toast.success('Plan generated successfully!');
       }
     } catch (error) { toast.error('Failed to generate plan'); } finally { setPlanLoading(false); }
   };
@@ -356,26 +371,50 @@ function Dashboard() {
                     </div>
                   </div>
 
-                  {/* Weather Forecast Area Chart */}
+                  {/* Weather Forecast Area Chart - 7 Days */}
                   {forecast && forecast.length > 0 && (
-                    <div style={{ marginTop: '20px', height: '140px', background: 'rgba(0,0,0,0.1)', padding: '10px', borderRadius: '12px' }}>
-                      <p style={{ margin: '0 0 5px 0', fontSize: '11px', fontWeight: 'bold', color: 'rgba(255,255,255,0.8)' }}>
-                         5-Day Local Forecast (🌡️ Temp / 💧 Humidity)
+                    <div style={{ marginTop: '20px', background: 'rgba(0,0,0,0.1)', padding: '15px', borderRadius: '12px' }}>
+                      <p style={{ margin: '0 0 10px 0', fontSize: '11px', fontWeight: 'bold', color: 'rgba(255,255,255,0.8)' }}>
+                         7-Day Extended Forecast (🌡️ Temp / 💧 Humidity)
                       </p>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={forecast}>
-                          <defs>
-                            <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#fca5a5" stopOpacity={0.8}/>
-                              <stop offset="95%" stopColor="#fca5a5" stopOpacity={0.1}/>
-                            </linearGradient>
-                          </defs>
-                          <XAxis dataKey="date" tick={{fill: 'white', fontSize: 10}} axisLine={false} tickLine={false} />
-                          <Tooltip contentStyle={{background: '#1e293b', border: 'none', borderRadius: '8px', color: 'white'}} />
-                          <Area type="monotone" name="Temperature (°C)" dataKey="temp" stroke="#ef4444" fillOpacity={1} fill="url(#colorTemp)" />
-                          <Area type="monotone" name="Humidity (%)" dataKey="humidity" stroke="#3b82f6" fill="none" strokeWidth={2} strokeDasharray="5 5" />
-                        </AreaChart>
-                      </ResponsiveContainer>
+                      <div style={{ height: '140px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={forecast}>
+                            <defs>
+                              <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#fca5a5" stopOpacity={0.8}/>
+                                <stop offset="95%" stopColor="#fca5a5" stopOpacity={0.1}/>
+                              </linearGradient>
+                            </defs>
+                            <XAxis dataKey="date" tick={{fill: 'white', fontSize: 10}} axisLine={false} tickLine={false} />
+                            <Tooltip contentStyle={{background: '#1e293b', border: 'none', borderRadius: '8px', color: 'white'}} />
+                            <Area type="monotone" name="Temperature (°C)" dataKey="temp" stroke="#ef4444" fillOpacity={1} fill="url(#colorTemp)" />
+                            <Area type="monotone" name="Humidity (%)" dataKey="humidity" stroke="#3b82f6" fill="none" strokeWidth={2} strokeDasharray="5 5" />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                      
+                      {/* Weather Alerts and Suggestions Grid */}
+                      {forecast.some(f => f.alert) && (
+                        <div style={{ marginTop: '15px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+                          {forecast.map((day, idx) => (
+                            day.alert && (
+                              <div key={idx} style={{ 
+                                background: day.alert.severity === 'critical' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(240, 167, 25, 0.2)',
+                                border: `1px solid ${day.alert.severity === 'critical' ? '#fca5a5' : '#fed7aa'}`,
+                                padding: '10px', borderRadius: '8px', fontSize: '0.85rem'
+                              }}>
+                                <strong>{day.date}:</strong> {day.alert.type.toUpperCase()}
+                                {day.suggestions && (
+                                  <div style={{ marginTop: '5px', fontSize: '0.8rem', opacity: 0.9 }}>
+                                    {day.suggestions.slice(0, 1).map((s, i) => <div key={i}>• {s}</div>)}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
@@ -508,14 +547,57 @@ function Dashboard() {
               {smartPlan && (
                 <div style={{ background: '#f8fafc', padding: '25px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                   <h3 style={{ marginTop: 0, color: '#1e293b' }}>⚙️ Generated Plan for: <span style={{color: '#2c5f2d'}}>{cropInput}</span></h3>
-                  <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.8', fontSize: '1.05rem', color: '#334155' }}>
-                    {smartPlan}
+                  
+                  {/* Crop Summary - Important First */}
+                  {smartPlanSummary && (
+                    <div style={{ background: 'linear-gradient(135deg, #dbeafe, #e0e7ff)', padding: '20px', borderRadius: '12px', marginBottom: '25px', border: 'left 4px solid #3b82f6' }}>
+                      <p style={{ margin: '0', fontWeight: '600', color: '#1e40af', fontSize: '1.1rem', marginBottom: '8px' }}>
+                        📋 About Growing {cropInput} in {weather?.city || 'Your Location'}:
+                      </p>
+                      <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.7', fontSize: '1rem', color: '#334155', fontFamily: 'system-ui' }}>
+                        {smartPlanSummary}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Crop Lifecycle Timeline/Diagram */}
+                  <div style={{ background: 'linear-gradient(135deg, #dcfce7, #f0fdf4)', padding: '20px', borderRadius: '12px', marginBottom: '25px', border: '1px solid #bbf7d0' }}>
+                    <p style={{ margin: '0 0 15px 0', fontWeight: 'bold', color: '#166534' }}>📅 Crop Lifecycle Stages:</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px' }}>
+                      {['🌱 Germination', '🌿 Seedling', '🌾 Vegetative', '🌸 Flowering', '🍎 Fruiting', '🏆 Maturity'].map((stage, idx) => (
+                        <div key={idx} style={{
+                          padding: '12px', borderRadius: '8px', background: 'white', textAlign: 'center',
+                          fontSize: '0.95rem', fontWeight: '600', color: '#166534', border: '1px solid #bbf7d0'
+                        }}>
+                          {stage}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: '15px', fontSize: '0.9rem', color: '#166534', fontStyle: 'italic' }}>
+                      💡 This visual represents the typical progression of the crop through its lifecycle. Timing varies based on climate and location.
+                    </div>
+                  </div>
+
+                  {/* Detailed Plan Text */}
+                  <div style={{ background: 'white', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+                    <p style={{ margin: '0 0 15px 0', fontWeight: 'bold', color: '#1e293b', fontSize: '1.05rem' }}>📖 Detailed Month-by-Month Plan:</p>
+                    <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.8', fontSize: '1rem', color: '#334155', fontFamily: 'system-ui' }}>
+                      {smartPlan}
+                    </div>
                   </div>
 
                   {/* Planner Chat System */}
                   <div style={{ marginTop: '30px', background: 'white', borderRadius: '12px', overflow: 'hidden', border: '1px solid #cbd5e1' }}>
-                    <div style={{ background: '#f1f5f9', padding: '12px 20px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1' }}>
-                      💬 Ask follow-up questions about this crop
+                    <div style={{ background: '#f1f5f9', padding: '12px 20px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>💬 Ask follow-up questions about this crop</span>
+                      <div style={{ display: 'flex', gap: '8px', background: 'white', borderRadius: '20px', padding: '3px' }}>
+                        <button onClick={() => setPlanLang('en')} style={{ padding: '5px 15px', background: planLang === 'en' ? '#2c5f2d' : 'transparent', color: planLang === 'en' ? 'white' : '#64748b', border: 'none', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.8rem' }}>
+                          English
+                        </button>
+                        <button onClick={() => setPlanLang('hi')} style={{ padding: '5px 15px', background: planLang === 'hi' ? '#2c5f2d' : 'transparent', color: planLang === 'hi' ? 'white' : '#64748b', border: 'none', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.8rem' }}>
+                          हिंदी
+                        </button>
+                      </div>
                     </div>
                     <div style={{ padding: '20px', maxHeight: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px' }}>
                       {planChatHistory.map((msg, idx) => (
@@ -533,7 +615,7 @@ function Dashboard() {
                     <div style={{ display: 'flex', padding: '15px', borderTop: '1px solid #cbd5e1', background: '#f8fafc' }}>
                       <input 
                         type="text" 
-                        placeholder="E.g. What if soil is very sandy?" 
+                        placeholder={planLang === 'hi' ? "जैसे - मिट्टी बहुत बलुई है तो?" : "E.g. What if soil is very sandy?"} 
                         value={chatInput} 
                         onChange={(e) => setChatInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && handlePlanChat()}
@@ -553,7 +635,8 @@ function Dashboard() {
           {/* TAB 2: GOVT SCHEMES */}
           {activeTab === 'schemes' && (
             <div style={{ animation: 'fadeIn 0.5s' }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+                {/* Language Toggle */}
                 <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: '30px', padding: '5px' }}>
                   <button onClick={() => handleGovLangSwitch('hi')} style={{ padding: '8px 20px', background: govLang === 'hi' ? 'white' : 'transparent', color: govLang === 'hi' ? '#2c5f2d' : '#64748b', border: 'none', borderRadius: '25px', fontWeight: 'bold', cursor: 'pointer', boxShadow: govLang === 'hi' ? '0 2px 5px rgba(0,0,0,0.1)' : 'none' }}>
                     हिंदी (Hindi)
@@ -562,16 +645,43 @@ function Dashboard() {
                     English
                   </button>
                 </div>
+
+                {/* Schemes vs Pesticides Sub-Tabs */}
+                <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: '30px', padding: '5px' }}>
+                  <button onClick={() => setSchemeTab('schemes')} style={{ padding: '8px 20px', background: schemeTab === 'schemes' ? '#2c5f2d' : 'transparent', color: schemeTab === 'schemes' ? 'white' : '#64748b', border: 'none', borderRadius: '25px', fontWeight: 'bold', cursor: 'pointer', boxShadow: schemeTab === 'schemes' ? '0 2px 5px rgba(0,0,0,0.1)' : 'none' }}>
+                    💰 Schemes
+                  </button>
+                  <button onClick={() => setSchemeTab('pesticides')} style={{ padding: '8px 20px', background: schemeTab === 'pesticides' ? '#2c5f2d' : 'transparent', color: schemeTab === 'pesticides' ? 'white' : '#64748b', border: 'none', borderRadius: '25px', fontWeight: 'bold', cursor: 'pointer', boxShadow: schemeTab === 'pesticides' ? '0 2px 5px rgba(0,0,0,0.1)' : 'none' }}>
+                    🧪 Pesticides
+                  </button>
+                </div>
               </div>
-              <div style={{ background: '#f8fafc', padding: '25px', borderRadius: '12px', border: '1px solid #e2e8f0', minHeight: '200px' }}>
-                {loadingSchemes ? (
-                  <Loader />
-                ) : (
-                  <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.8', fontSize: '1.05rem', color: '#334155' }}>
-                    {govSchemes}
-                  </div>
-                )}
-              </div>
+
+              {/* Schemes Content */}
+              {schemeTab === 'schemes' && (
+                <div style={{ background: '#f8fafc', padding: '25px', borderRadius: '12px', border: '1px solid #e2e8f0', minHeight: '300px' }}>
+                  {loadingSchemes ? (
+                    <Loader />
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.8', fontSize: '1.05rem', color: '#334155' }}>
+                      {govSchemes}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Pesticides Content */}
+              {schemeTab === 'pesticides' && (
+                <div style={{ background: '#f8fafc', padding: '25px', borderRadius: '12px', border: '1px solid #e2e8f0', minHeight: '300px' }}>
+                  {loadingSchemes ? (
+                    <Loader />
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.8', fontSize: '1.05rem', color: '#334155' }}>
+                      {govPesticides || '🧪 Loading government-approved pesticides...'}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

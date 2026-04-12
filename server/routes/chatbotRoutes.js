@@ -65,6 +65,7 @@ import {
   getSellingAdvice,
   diagnoseDisease,
   getGovernmentSchemes,
+  getGovernmentPesticides,
   getSmartCropPlan,
   chatWithSmartPlan
 } from '../services/geminiService.js';
@@ -99,10 +100,12 @@ router.post('/chat', async (req, res) => {
 router.post('/quick-explain', async (req, res) => {
   const { 
     diseaseName, 
+    cropName,
     symptoms, 
     treatment, 
     prevention, 
-    organicRemedy, 
+    organicRemedy,
+    location,
     language = 'en' 
   } = req.body;
 
@@ -117,53 +120,63 @@ router.post('/quick-explain', async (req, res) => {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-    const prompt = `You are an agricultural expert assistant explaining crop disease analysis results to a farmer.
+    const prompt = `You are a warm, experienced farming advisor talking directly to a farmer. Make the explanation feel like advice from a knowledgeable neighbor, not a textbook.
 
-GOAL:
-- Provide a clear, professional, and easy-to-understand explanation
-- Keep language simple but not overly emotional
-- Focus on practical actions
+FARMER'S SITUATION:
+- Crop: ${cropName || 'Unspecified crop'}
+- Location: ${location || 'Their farm'}
+- Problem: ${diseaseName}
+- Symptoms Seen: ${symptoms || 'Visual disease symptoms'}
+- Treatment Available: ${treatment || 'Chemical/Organic treatment'}
+- Prevention Methods: ${prevention || 'Preventive measures'}
+- Organic Option: ${organicRemedy || 'Organic remedy'}
 
-INSTRUCTIONS:
-- Use simple and clear sentences (avoid complex scientific jargon)
-- Be structured and informative
-- Keep tone professional and helpful
+WRITE A WARM, CONVERSATIONAL EXPLANATION (${language === 'hi' ? 'Hindi' : 'English'}) THAT:
 
-LANGUAGE:
-${language === 'hi' 
-  ? 'Write in simple Hindi (Devanagari script, clear and professional tone)' 
-  : 'Write in simple English (clear, professional and easy to understand)'}
+1. **समझो अपनी समस्या (Understand Your Problem)** - 2-3 lines
+   - Explain what this disease is in EVERYDAY language
+   - Why it happens on farms like theirs
+   - Is it common/serious? Should they worry?
+   
+2. **आज ही करना चाहिए (What to Do RIGHT NOW)** - 3-4 lines
+   - Give SPECIFIC, EXACT instructions (like talking to a friend)
+   - Mention exact product names and quantities
+   - Include timing (सुबह/शाम - morning/evening)
+   - Best/organic options
+   
+3. **अगली बार कैसे बचाएं (Prevent Next Time)** - 2-3 lines
+   - Simple, practical prevention steps
+   - Crop rotation, variety selection, water management
+   
+4. **एक और बात (One More Thing)** - 1-2 lines
+   - Encouraging statement
+   - Timeline for recovery
+   - When will they see improvement
 
-FORMAT:
-- Problem: (1 sentence explaining disease and cause)
-- Immediate Action: (2 sentences with exact steps and quantity if possible)
-- Prevention: (1 sentence)
-- Advice: (1 short sentence)
+TONE: Friendly farmer-to-farmer advice, practical, encouraging
+LANGUAGE: ${language === 'hi' 
+  ? 'Simple conversational Hindi (Devanagari) - like a seasoned farmer uncle giving advice' 
+  : 'Simple English - warm and encouraging, like talking to a friend. Avoid technical jargon.'}
+LENGTH: 180-250 words (conversational, not rushed)
 
-LENGTH: 60-90 words total
-
-DATA:
-Disease: ${diseaseName}
-Symptoms: ${symptoms || 'Not specified'}
-Treatment: ${treatment || 'Apply recommended treatment'}
-Prevention: ${prevention || 'Not specified'}
-Organic Remedy: ${organicRemedy || 'Not specified'}
-
-Generate a clear explanation now.`;
+WRITE THIS NATURALLY - AVOID LIST FORMATS OR BULLET POINTS. WRITE IT LIKE SPEAKING TO A FRIEND.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
     let reply = response.text();
 
-    // Clean response
+    // Clean response - preserve formatting but remove markdown
     reply = reply
       .replace(/\*\*/g, '')
+      .replace(/\*([^\*]+)\*/g, '$1')
       .replace(/```[\s\S]*?```/g, '')
       .trim();
 
     res.json({ 
       success: true, 
-      reply 
+      reply,
+      disease: diseaseName,
+      crop: cropName
     });
 
   } catch (error) {
@@ -171,18 +184,73 @@ Generate a clear explanation now.`;
 
     // Professional fallback
     const fallback = language === 'hi'
-      ? `समस्या: ${diseaseName} एक सामान्य फसल रोग है। 
-तुरंत कार्यवाही: ${treatment ? treatment.substring(0, 120) : 'उपयुक्त दवा का छिड़काव करें।'} 
-रोकथाम: ${prevention ? prevention.substring(0, 80) : 'नियमित निगरानी रखें।'} 
-सलाह: समय पर उपचार से फसल सुरक्षित रखी जा सकती है।`
-      : `Problem: ${diseaseName} is a common crop disease. 
-Immediate Action: ${treatment ? treatment.substring(0, 120) : 'Apply appropriate treatment immediately.'} 
-Prevention: ${prevention ? prevention.substring(0, 80) : 'Monitor crops regularly.'} 
-Advice: Timely action can help protect your crop.`;
+      ? `भाई, आपकी ${cropName || 'फसल'} में ${diseaseName} हुआ है। यह आमतौर पर नमी और गर्मी से होता है। घबराइए मत, सही इलाज से ठीक हो जाएगी।
+
+तुरंत करना चाहिए: ${treatment ? treatment.substring(0, 150) : 'बाजार में मिलने वाली कॉपर सल्फेट या स्ट्रेप्टोमाइसिन दवा का छिड़काव करें। 10 लीटर पानी में 25 ग्राम दवा मिलाकर सुबह या शाम करें।'} 
+
+अगली बार बचने के लिए: रोग-रोधी किस्में लगाएं, फसल चक्र अपनाएं, और जलभराव से बचें।
+
+धैर्य रखें: 1-2 हफ्ते में सुधार दिखने लगेगा। नियमित निगरानी करते रहें।`
+      : `Friend, your ${cropName || 'crop'} has ${diseaseName}. This usually happens in warm, humid weather. Don't worry - proper treatment will fix it quickly.
+
+Do this immediately: ${treatment ? treatment.substring(0, 150) : 'Use Copper Sulfate or Streptomycin spray available at any agro shop. Mix 25g in 10 liters of water and spray early morning or evening.'} 
+
+Prevent next time: Grow disease-resistant varieties, practice crop rotation, and avoid waterlogging.
+
+Be patient: You\'ll see improvement in 1-2 weeks. Keep checking your plants regularly.`
+    ;
 
     res.json({ 
       success: true, 
-      reply: fallback 
+      reply: fallback,
+      disease: diseaseName,
+      crop: cropName
+    });
+  }
+});
+
+// ✅ NEW: Disease Q&A endpoint
+router.post('/disease-qa', async (req, res) => {
+  const { 
+    diseaseName,
+    cropName,
+    question,
+    language = 'en'
+  } = req.body;
+
+  if (!diseaseName || !question) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Disease and question required' 
+    });
+  }
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+    const prompt = `A farmer is asking about ${diseaseName} affecting their ${cropName}. 
+They want to know: "${question}"
+
+Answer like a helpful farming expert - warm, practical, and direct.
+${language === 'hi' ? 'Answer in conversational Hindi (Devanagari), like talking to a friend.' : 'Answer in simple English like talking to a friend.'}
+Keep answer to 3-4 sentences maximum, practical and actionable.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let reply = response.text().trim();
+
+    res.json({ 
+      success: true, 
+      reply 
+    });
+
+  } catch (error) {
+    console.error('Disease QA error:', error);
+    res.json({ 
+      success: false, 
+      reply: language === 'hi' 
+        ? 'सवाल पूछने में समस्या आ रही है। कृपया फिर से कोशिश करें।'
+        : 'Sorry, having trouble answering. Please try again.'
     });
   }
 });
@@ -216,6 +284,14 @@ router.post('/schemes', async (req, res) => {
   const { category, state, language = 'hi' } = req.body;
   
   const result = await getGovernmentSchemes(category, state, language);
+  res.json(result);
+});
+
+// Government pesticides endpoint
+router.post('/pesticides', async (req, res) => {
+  const { state, language = 'hi' } = req.body;
+  
+  const result = await getGovernmentPesticides(state, language);
   res.json(result);
 });
 

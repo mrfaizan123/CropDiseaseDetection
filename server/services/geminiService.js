@@ -353,23 +353,100 @@ export const getGovernmentSchemes = async (category, state, language = 'hi') => 
   }
 };
 
-export const getSmartCropPlan = async (crop, location, language = 'hi') => {
+export const getGovernmentPesticides = async (state, language = 'hi') => {
   try {
-    const prompt = `Act as an expert agricultural scientist. A farmer in exactly ${location || 'India'} wants to grow ${crop}. 
-    Automatically infer the typical soil type and climate of ${location || 'their region'}.
-    Provide a highly detailed, MONTH-BY-MONTH crop tracking plan covering:
-    1. Local Soil Preparation.
-    2. Best Seed Varieties for that exact weather.
-    3. Precise Water Supply schedule.
-    4. Exact Pesticide & Fertilizer names with timings.
-    Month-by-month breakdown is CRITICAL.
-    Keep it in ${language === 'hi' ? 'simple, actionable Hindi (Devanagari)' : 'simple, actionable English'}. Use emojis and bullet points for readability.`;
-    
+    const prompt = `List top 5 government-approved pesticides and herbicides launched recently in ${state || 'India'} for farmers. 
+For each pesticide include:
+1. Product Name (Brand)
+2. Purpose (what diseases/pests it controls)
+3. Price range per liter/kg
+4. How to use (dilution & spray method)
+5. Safety precautions
+
+Make it practical and farmer-friendly. Response in ${language === 'hi' ? 'simple Hindi (Devanagari)' : 'simple English'}.
+Use bullet points and clear formatting for readability.`;
     const response = await groq.chat.completions.create({
       messages: [{ role: "user", content: prompt }],
-      model: "llama-3.3-70b-versatile", max_tokens: 800, temperature: 0.7
+      model: "llama-3.3-70b-versatile",
+      max_tokens: 600,
     });
-    return { success: true, plan: response.choices[0]?.message?.content };
+    return { success: true, pesticides: response.choices[0]?.message?.content };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const getSmartCropPlan = async (crop, location, language = 'hi') => {
+  try {
+    // PART 1: Generate Summary
+    const summaryPrompt = `You are an agricultural expert. A farmer in ${location || 'India'} wants to grow ${crop}.
+
+GENERATE A BRIEF SUMMARY (3-4 sentences) about:
+1. Is ${crop} suitable for ${location}? (climate, soil compatibility)
+2. Why should/can they grow it? (demand, profitability, easiness)
+3. Any special considerations for this location and crop?
+4. Expected harvest time and yield estimate
+
+Keep it practical, encouraging, and honest.
+Language: ${language === 'hi' ? 'Simple Hindi (Devanagari), like talking to a friend' : 'Simple English, conversational tone'}
+Do NOT use bullet points - write flowing paragraph.`;
+
+    const summaryResponse = await groq.chat.completions.create({
+      messages: [{ role: "user", content: summaryPrompt }],
+      model: "llama-3.3-70b-versatile", 
+      max_tokens: 300, 
+      temperature: 0.7
+    });
+    
+    const summary = summaryResponse.choices[0]?.message?.content?.trim() || '';
+
+    // PART 2: Generate Detailed Plan
+    const detailPrompt = `Act as an expert agricultural scientist. A farmer in exactly ${location || 'India'} wants to grow ${crop}. 
+    Automatically infer the typical soil type and climate of ${location || 'their region'}.
+    Provide a HIGHLY DETAILED crop management plan including:
+    
+    **📅 CROP LIFECYCLE:**
+    - Growth stages (Germination → Seedling → Vegetative → Flowering → Fruiting → Maturity)
+    - Duration of each stage (weeks/months)
+    - What to look for at each stage
+    
+    **📆 MONTH-BY-MONTH BREAKDOWN:**
+    For each applicable month, provide:
+    1. Soil Preparation (timing, type of fertilizer, quantity per acre)
+    2. Best Seed Varieties for that exact weather (with names)
+    3. Sowing & Germination requirements
+    4. Water Supply schedule (frequency, quantity per acre per day)
+    5. Fertilizer names with EXACT timings and quantities (e.g., "10g Urea per L water, Week 4")
+    6. Pesticide names with timing (e.g., "Spray Copper Hydroxide 2g/L in Week 6 if needed")
+    7. Common diseases/pests and prevention methods
+    8. Harvesting indicators & exact timing
+    
+    **🔍 KEY PARAMETERS:**
+    - Soil pH and moisture requirements
+    - Temperature range for optimal growth (_°C to _°C)
+    - Rainfall needs (mm per month)
+    - Expected yield per acre
+    - Expected maturity period (days)
+    
+    Keep it in ${language === 'hi' ? 'simple, actionable Hindi (Devanagari)' : 'simple, actionable English'}. 
+    Use emojis and clear formatting for readability.
+    Be SPECIFIC with quantities, dates, and product names - no vague advice.`;
+    
+    const planResponse = await groq.chat.completions.create({
+      messages: [{ role: "user", content: detailPrompt }],
+      model: "llama-3.3-70b-versatile", 
+      max_tokens: 1500, 
+      temperature: 0.7
+    });
+    
+    const plan = planResponse.choices[0]?.message?.content?.trim() || '';
+
+    return { 
+      success: true, 
+      summary: summary,
+      plan: plan,
+      fullPlan: `${summary}\n\n${plan}` // Combined for backward compatibility
+    };
   } catch (error) { 
     return { success: false, error: error.message }; 
   }
