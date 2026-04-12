@@ -2,7 +2,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 
-const ML_API_URL = 'http://localhost:5001/predict';
+const ML_API_URL = 'https://pythoncropdisease.onrender.com/predict';
 
 export const predictDiseaseReal = async (imagePath) => {
   try {
