@@ -40,6 +40,8 @@ function Prediction() {
       .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '') // Symbols and pictographs extended
       .replace(/[\u{2600}-\u{26FF}]/gu, '') // Miscellaneous symbols
       .replace(/[\u{2700}-\u{27BF}]/gu, '') // Dingbats
+      .replace(/_/g, ' ') // Replace underscores with spaces (Tomato_Bacterial_spot -> Tomato Bacterial spot)
+      .replace(/\.(?=[A-Z])/g, ' ') // Replace periods before capitals with spaces (Tomato.Spot -> Tomato Spot)
       .replace(/\*\*/g, '') // Remove markdown bold
       .replace(/\*/g, '') // Remove markdown italics
       .replace(/#{1,6}\s/g, '') // Remove headers
@@ -238,9 +240,11 @@ function Prediction() {
       }
     } catch (error) {
       console.error('Quick explain error:', error);
+      // Clean disease name for readable display
+      const cleanDiseaseName = result.diseaseName.replace(/_/g, ' ').replace(/\./g, ' ');
       const fallback = language === 'hi' 
-        ? `भाई, आपकी फसल में ${result.diseaseName} हुआ है। यह आमतौर पर नमी के कारण होता है। सही इलाज से ठीक हो जाएगी। ${result.treatment.substring(0, 100) || ''}`
-        : `Friend, your crop has ${result.diseaseName}. This usually happens in humid conditions. Proper treatment will fix it. ${result.treatment.substring(0, 100) || ''}`;
+        ? `आपकी ${result.className || 'फसल'} में ${cleanDiseaseName} की समस्या आ गई है। नमी और गर्मी इसका कारण हो सकते हैं। घबराइए मत, सही इलाज से 1-2 हफ्ते में ठीक हो जाएगी। बाजार में मिलने वाली दवा का इस्तेमाल करें और नियमित निगरानी रखें।`
+        : `Your ${result.className || 'crop'} has ${cleanDiseaseName}. Humidity and warmth usually cause this problem. Don't worry - proper treatment will fix it in 1-2 weeks. Use available market treatments and monitor your plants regularly.`;
       setQuickExplain(prev => ({ ...prev, [key]: fallback }));
       initializeDiseaseChat(result.diseaseName, result.className);
     } finally {
