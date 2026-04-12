@@ -131,35 +131,15 @@ FARMER'S SITUATION:
 - Prevention Methods: ${prevention || 'Preventive measures'}
 - Organic Option: ${organicRemedy || 'Organic remedy'}
 
-WRITE A WARM, CONVERSATIONAL EXPLANATION (${language === 'hi' ? 'Hindi' : 'English'}) THAT:
+WRITE ONE CLEAN PARAGRAPH (${language === 'hi' ? 'Hindi' : 'English'}) THAT FLOWS NATURALLY:
 
-1. **समझो अपनी समस्या (Understand Your Problem)** - 2-3 lines
-   - Explain what this disease is in EVERYDAY language
-   - Why it happens on farms like theirs
-   - Is it common/serious? Should they worry?
-   
-2. **आज ही करना चाहिए (What to Do RIGHT NOW)** - 3-4 lines
-   - Give SPECIFIC, EXACT instructions (like talking to a friend)
-   - Mention exact product names and quantities
-   - Include timing (सुबह/शाम - morning/evening)
-   - Best/organic options
-   
-3. **अगली बार कैसे बचाएं (Prevent Next Time)** - 2-3 lines
-   - Simple, practical prevention steps
-   - Crop rotation, variety selection, water management
-   
-4. **एक और बात (One More Thing)** - 1-2 lines
-   - Encouraging statement
-   - Timeline for recovery
-   - When will they see improvement
+Start by acknowledging the problem (what causes this disease, why it happened). Then give practical immediate action (exact product names, quantities, timing). Finally, mention prevention for next time and encouragement (1-2 weeks improvement expected).
 
-TONE: Friendly farmer-to-farmer advice, practical, encouraging
+TONE: Like talking to a farming friend - warm, practical, encouraging. NO BULLET POINTS, NO BOLD HEADERS. Just a natural flowing explanation in 4-5 sentences.
 LANGUAGE: ${language === 'hi' 
-  ? 'Simple conversational Hindi (Devanagari) - like a seasoned farmer uncle giving advice' 
-  : 'Simple English - warm and encouraging, like talking to a friend. Avoid technical jargon.'}
-LENGTH: 180-250 words (conversational, not rushed)
-
-WRITE THIS NATURALLY - AVOID LIST FORMATS OR BULLET POINTS. WRITE IT LIKE SPEAKING TO A FRIEND.`;
+  ? 'Simple conversational Hindi (Devanagari) - use everyday words a farmer would understand' 
+  : 'Simple English - warm and encouraging like talking to a friend. Avoid technical jargon.'}
+LENGTH: 150-220 words (conversational, not rushed)`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
