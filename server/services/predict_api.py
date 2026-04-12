@@ -25,8 +25,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, 'm1_model', 'plant_model.h5')
 CLASSES_PATH = os.path.join(BASE_DIR, 'm1_model', 'classes.json')
 
-# ==================== OPENROUTER API KEY ===================
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', "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")
+# ==================== API KEY ====================
+GEMINI_API_KEY ="AIzaSyAUTX6csvREbhtEqEhk62veHrFXBQ6yr3Y"
+
 
 SUPPORTED_CROPS = ['tomato', 'potato', 'bell pepper', 'pepper']
 
@@ -35,7 +36,7 @@ print("🌾 PROFESSIONAL PLANT DISEASE DETECTION API")
 print("=" * 60)
 print(f"📁 Model Path: {MODEL_PATH}")
 print(f"📁 Classes Path: {CLASSES_PATH}")
-print(f"🔑 OpenRouter API Key: {'✅ Loaded' if OPENROUTER_API_KEY else '❌ Not Found'}")
+print(f"🔑 Gemini API Key: {'✅ Loaded' if GEMINI_API_KEY else '❌ Not Found'}")
 print("=" * 60)
 
 # ==================== FILE CHECK ====================
@@ -65,72 +66,49 @@ with open(CLASSES_PATH, 'r') as f:
 print(f"✅ Loaded {len(classes)} disease classes")
 print("=" * 60)
 
-# ==================== OPENROUTER CROP CLASSIFICATION ====================
-
-def classify_crop_with_openrouter(image_bytes):
-    """
-    Use OpenRouter API (Gemini 2.5 Flash via OpenRouter) to identify crop
-    """
-    if not OPENROUTER_API_KEY:
-        print("⚠️ OpenRouter API key missing")
+# ==================== GEMINI ====================
+def classify_crop_with_gemini(image_bytes):
+    if not GEMINI_API_KEY:
+        print("⚠️ Gemini API key missing")
         return None
 
     try:
-        # Encode image to base64
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
-        
-        # OpenRouter API endpoint
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        
-        headers = {
-            'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-            'Content-Type': 'application/json'
-        }
-        
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+
         payload = {
-            "model": "google/gemini-2.5-flash",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "What crop is shown in this image? Answer with ONLY ONE WORD: 'tomato', 'potato', 'bell pepper', or 'other'. Do not add any other text."
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
+            "contents": [{
+                "parts": [
+                    {"text": "Identify crop: tomato, potato, bell pepper, or other. Only one word."},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64_image
                         }
-                    ]
-                }
-            ],
-            "max_tokens": 10,
-            "temperature": 0
+                    }
+                ]
+            }]
         }
-        
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        
-        if response.status_code == 200:
-            result = response.json()
-            crop = result['choices'][0]['message']['content'].strip().lower()
-            crop = crop.replace('.', '').strip()
-            print(f"🤖 OpenRouter says: '{crop}'")
-            
+
+        res = requests.post(url, json=payload, timeout=15)
+
+        if res.status_code == 200:
+            result = res.json()
+            crop = result['candidates'][0]['content']['parts'][0]['text'].strip().lower()
+            print(f"🤖 Gemini result: {crop}")
+
             if crop in SUPPORTED_CROPS:
                 return crop
             elif 'pepper' in crop:
                 return 'bell pepper'
-            else:
-                return None
+            return None
         else:
-            print(f"❌ OpenRouter API error: {response.status_code}")
-            print(f"   Response: {response.text[:200]}")
+            print(f"❌ Gemini error: {res.status_code}")
             return None
 
     except Exception as e:
-        print(f"❌ OpenRouter exception: {e}")
+        print(f"❌ Gemini exception: {e}")
         return None
 
 # ==================== PREPROCESS ====================
@@ -171,7 +149,7 @@ def get_disease_prediction(image_bytes):
         print("🚀 Running prediction...")
         preds = model.predict(processed, verbose=0)
 
-        print(f"📊 Raw predictions shape: {preds.shape}")
+        print(f"📊 Raw predictions: {preds}")
 
         idx = np.argmax(preds[0])
         confidence = float(np.max(preds[0]) * 100)
@@ -215,52 +193,35 @@ def predict():
 
         print(f"📁 File: {file.filename}")
 
-        # ========== STEP 1: OpenRouter Crop Classification ==========
-        print("📷 OpenRouter crop detection...")
-        crop = classify_crop_with_openrouter(image_bytes)
+        # STEP 1
+        print("📷 Gemini crop detection...")
+        crop = classify_crop_with_gemini(image_bytes)
 
         if crop is None:
             return jsonify({
                 "success": False,
-                "error": "UNSUPPORTED_CROP",
-                "message": "This image does not show a supported crop.",
-                "supported_crops": ["🍅 Tomato", "🥔 Potato", "🫑 Bell Pepper"]
+                "error": "UNSUPPORTED_CROP"
             }), 400
 
-        print(f"✅ Crop identified: {crop}")
+        print(f"✅ Crop: {crop}")
 
-        # ========== STEP 2: Disease Detection ==========
+        # STEP 2
         print("🔬 Disease detection...")
         result = get_disease_prediction(image_bytes)
 
         if result is None:
             return jsonify({"success": False, "error": "PREDICTION_FAILED"}), 500
 
-        print(f"🎯 Disease: {result['className']}")
-        print(f"📊 Confidence: {result['confidence']}%")
-
-        # Map crop to display name
-        crop_display = {
-            'tomato': '🍅 Tomato',
-            'potato': '🥔 Potato',
-            'bell pepper': '🫑 Bell Pepper'
-        }.get(crop, crop)
+        print(f"🎯 Result: {result}")
 
         return jsonify({
             "success": True,
-            "cropClassifiedBy": "OpenRouter AI (Gemini 2.5 Flash)",
-            "cropType": crop_display,
-            "className": result['className'],
-            "confidence": result['confidence'],
-            "isHealthy": result['isHealthy'],
-            "top3": result['top3'],
-            "message": f"✅ {crop_display} detected. {result['className']} with {result['confidence']}% confidence"
+            "crop": crop,
+            **result
         })
 
     except Exception as e:
         print(f"❌ Server error: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/health')
@@ -268,20 +229,9 @@ def health():
     return jsonify({
         "status": "ok",
         "model_loaded": model is not None,
-        "openrouter_available": bool(OPENROUTER_API_KEY),
-        "supported_crops": ["Tomato", "Potato", "Bell Pepper"],
-        "total_disease_classes": len(classes)
+        "classes": len(classes)
     })
 
 # ==================== RUN ====================
 if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("🚀 STARTING PROFESSIONAL API SERVER")
-    print("=" * 60)
-    print(f"✅ Your Model: {len(classes)} disease classes")
-    print(f"✅ OpenRouter API: {'ENABLED ✅' if OPENROUTER_API_KEY else 'DISABLED ❌'}")
-    print(f"✅ Model: Gemini 2.5 Flash via OpenRouter")
-    print("🚀 Server running on http://0.0.0.0:5001")
-    print("=" * 60 + "\n")
-    
-    app.run(host="0.0.0.0", port=5001, debug=False)
+    app.run(host="0.0.0.0", port=5001)
