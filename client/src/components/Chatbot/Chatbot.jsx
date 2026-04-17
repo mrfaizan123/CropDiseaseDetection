@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import API from '../../services/api.js';
 import { motion, AnimatePresence } from 'framer-motion';
-
+import logo from '../Farmguru.png';
 function Chatbot() {
   const [isOpen, setIsOpen] = useState(false);
   const [language, setLanguage] = useState('hi');
@@ -275,11 +275,18 @@ function Chatbot() {
               flexShrink: 0
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <img 
-                  src="https://placehold.co/45x45/ffffff/2c5f2d?text=FG" 
-                  alt="FarmGuru Icon"
-                  style={{ borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)' }}
-                />
+               <img 
+  src={logo} 
+  alt="FarmGuru Logo"
+  style={{
+    width: '42px',
+    height: '42px',
+    objectFit: 'cover',
+    borderRadius: '50%',
+    border: '2px solid rgba(255,255,255,0.2)',
+    flexShrink: 0
+  }}
+/>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>FarmGuru</h3>
                   <p style={{ margin: '2px 0 0', fontSize: '10px', opacity: 0.85 }}>
