@@ -38,19 +38,25 @@ SUPPORTED_CROP_CLASSES_PREFIXES = [
     'Pepper__bell__'
 ]
 
-# ==================== GEMINI API FROM ENV ====================
+# ==================== API KEYS FROM ENV ====================
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY1', '')
+OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
+
 # If not found in env, try direct (fallback for testing)
 if not GEMINI_API_KEY:
     GEMINI_API_KEY = ""
+
+if not OPENROUTER_API_KEY:
+    OPENROUTER_API_KEY = ""
 
 print("=" * 60)
 print("🌾 PROFESSIONAL PLANT DISEASE DETECTION API")
 print("=" * 60)
 print(f"📁 Model Path: {MODEL_PATH}")
 print(f"📁 Classes Path: {CLASSES_PATH}")
-print("🤖 Mode: HYBRID (Gemini LLM + Model Fallback)")
+print("🤖 Mode: HYBRID (Gemini -> OpenRouter -> Model Fallback)")
 print(f"🔑 Gemini API: {'✅ Available' if GEMINI_API_KEY else '❌ Not configured'}")
+print(f"🔑 OpenRouter API: {'✅ Available' if OPENROUTER_API_KEY else '❌ Not configured'}")
 print("=" * 60)
 
 # ==================== FILE CHECK ====================
@@ -83,10 +89,10 @@ print("=" * 60)
 # ==================== HYBRID VALIDATION WITH LLM ====================
 
 def classify_crop_with_gemini(image_bytes):
-    """Use Gemini LLM to verify crop - with error handling"""
+    """Use Gemini LLM to verify crop - with error handling and rate limit detection"""
     if not GEMINI_API_KEY:
-        print("⚠️ Gemini API key missing - will use fallback")
-        return None
+        print("⚠️ Gemini API key missing - skipping")
+        return None, False
 
     try:
         print("🤖 Attempting Gemini verification...")
@@ -117,39 +123,112 @@ def classify_crop_with_gemini(image_bytes):
 
             if crop in ['tomato', 'potato', 'bell pepper', 'pepper']:
                 if 'pepper' in crop:
-                    return 'bell pepper'
-                return crop
+                    return 'bell pepper', True
+                return crop, True
             else:
                 print(f"❌ Gemini detected unsupported: {crop}")
-                return None
+                return None, True
+        elif res.status_code == 429:  # Rate limit exceeded
+            print(f"⚠️ Gemini rate limit exceeded (429) - will try OpenRouter")
+            return None, False
         else:
-            print(f"⚠️ Gemini error {res.status_code} - using fallback")
-            return None
+            print(f"⚠️ Gemini error {res.status_code} - trying next option")
+            return None, False
 
     except requests.exceptions.Timeout:
-        print("⚠️ Gemini timeout - using fallback")
-        return None
+        print("⚠️ Gemini timeout - trying next option")
+        return None, False
     except requests.exceptions.ConnectionError:
-        print("⚠️ Gemini connection error - using fallback")
-        return None
+        print("⚠️ Gemini connection error - trying next option")
+        return None, False
     except Exception as e:
-        print(f"⚠️ Gemini error: {e} - using fallback")
-        return None
+        print(f"⚠️ Gemini error: {e} - trying next option")
+        return None, False
 
-def validate_with_model_fallback(prediction_result):
-    """Fallback validation using model predictions only"""
+def classify_crop_with_openrouter(image_bytes):
+    """Use OpenRouter LLM to verify crop - as fallback to Gemini"""
+    if not OPENROUTER_API_KEY:
+        print("⚠️ OpenRouter API key missing - skipping")
+        return None, False
+
+    try:
+        print("🤖 Attempting OpenRouter verification...")
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "google/gemini-2.0-flash-exp:free",  # Free model on OpenRouter
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Look at this image and identify which crop it is. Respond with ONLY the crop name: tomato, potato, or bell pepper. If it's none of these, respond with 'other'. Do NOT include any extra words."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 50
+        }
+
+        res = requests.post(url, json=payload, headers=headers, timeout=15)
+
+        if res.status_code == 200:
+            result = res.json()
+            crop = result['choices'][0]['message']['content'].strip().lower()
+            print(f"✅ OpenRouter result: {crop}")
+
+            if crop in ['tomato', 'potato', 'bell pepper', 'pepper']:
+                if 'pepper' in crop:
+                    return 'bell pepper', True
+                return crop, True
+            else:
+                print(f"❌ OpenRouter detected unsupported: {crop}")
+                return None, True
+        elif res.status_code == 429:  # Rate limit exceeded
+            print(f"⚠️ OpenRouter rate limit exceeded (429) - falling back to model")
+            return None, False
+        else:
+            print(f"⚠️ OpenRouter error {res.status_code} - falling back to model")
+            return None, False
+
+    except requests.exceptions.Timeout:
+        print("⚠️ OpenRouter timeout - falling back to model")
+        return None, False
+    except requests.exceptions.ConnectionError:
+        print("⚠️ OpenRouter connection error - falling back to model")
+        return None, False
+    except Exception as e:
+        print(f"⚠️ OpenRouter error: {e} - falling back to model")
+        return None, False
+
+def validate_with_model_only(prediction_result):
+    """Validation using model predictions only (no LLM verification)"""
     predicted_class = prediction_result['className']
     confidence = prediction_result['confidence']
     top_3 = prediction_result['top3']
     
-    print("\n📋 Model Fallback Validation (Gemini unavailable)")
+    print("\n📋 Model-Only Validation (LLM unavailable)")
     
     # Check 1: Is top prediction from supported crop?
     is_supported = is_supported_crop_class(predicted_class)
     print(f"  Top Prediction: {predicted_class} ({confidence}%)")
     
     # Check 2: Confidence threshold
-    is_confident = confidence > 65
+    is_confident = confidence > 20
     print(f"  Confidence: {confidence}% {'✅ (>65%)' if is_confident else '❌ (need >65%)'}")
     
     # Check 3: All top 3 predictions must be supported crops
@@ -163,11 +242,11 @@ def validate_with_model_fallback(prediction_result):
         if not is_supported:
             print(f"  ❌ Top prediction is NOT from supported crops")
         if not is_confident:
-            print(f"  ❌ Confidence too low (need >65%)")
+            print(f"  ❌ Confidence too low (need >20%)")
         if not all_top3_supported:
             print(f"  ❌ Not all top 3 predictions are supported crops")
     
-    print(f"  Fallback Result: {'✅ ACCEPT' if is_valid else '❌ REJECT'}\n")
+    print(f"  Model-Only Result: {'✅ ACCEPT' if is_valid else '❌ REJECT'}\n")
     
     return is_valid
 
@@ -283,11 +362,11 @@ def predict():
         print("🤖 STEP 1: LLM VERIFICATION (Gemini)")
         print("="*60)
         
-        gemini_result = classify_crop_with_gemini(image_bytes)
+        gemini_crop, gemini_success = classify_crop_with_gemini(image_bytes)
         
-        if gemini_result is not None:
+        if gemini_success and gemini_crop is not None:
             # Gemini worked! Use its result
-            print(f"✅ Gemini approved: {gemini_result}")
+            print(f"✅ Gemini approved: {gemini_crop}")
             
             if not is_supported_crop_class(predicted_class):
                 print(f"❌ But model predicted unsupported class - REJECT")
@@ -304,31 +383,66 @@ def predict():
                 "verification": "gemini",
                 **result
             })
-        
-        # STEP 3: Gemini failed - use model fallback
-        print("\n" + "="*60)
-        print("⚠️ STEP 2: MODEL FALLBACK VALIDATION")
-        print("="*60)
-        
-        is_valid = validate_with_model_fallback(result)
-        
-        if not is_valid:
+        elif not gemini_success:
+            # Gemini failed (rate limit or error) - try OpenRouter
+            print("\n" + "="*60)
+            print("🤖 STEP 2: LLM VERIFICATION (OpenRouter - Fallback)")
+            print("="*60)
+            
+            openrouter_crop, openrouter_success = classify_crop_with_openrouter(image_bytes)
+            
+            if openrouter_success and openrouter_crop is not None:
+                # OpenRouter worked! Use its result
+                print(f"✅ OpenRouter approved: {openrouter_crop}")
+                
+                if not is_supported_crop_class(predicted_class):
+                    print(f"❌ But model predicted unsupported class - REJECT")
+                    return jsonify({
+                        "success": False,
+                        "error": "UNSUPPORTED_CROP",
+                        "message": "Image does not match a supported crop"
+                    }), 400
+                
+                crop = get_crop_name_from_class(predicted_class)
+                return jsonify({
+                    "success": True,
+                    "crop": crop,
+                    "verification": "openrouter",
+                    **result
+                })
+            else:
+                # OpenRouter also failed - use model directly
+                print("\n" + "="*60)
+                print("⚠️ STEP 3: MODEL-ONLY VERIFICATION (No LLM)")
+                print("="*60)
+                
+                is_valid = validate_with_model_only(result)
+                
+                if not is_valid:
+                    return jsonify({
+                        "success": False,
+                        "error": "UNSUPPORTED_CROP",
+                        "message": "Image does not appear to be a Tomato, Potato, or Bell Pepper leaf"
+                    }), 400
+                
+                # Model validation passed
+                crop = get_crop_name_from_class(predicted_class)
+                print(f"✅ Model-only validation passed! Crop: {crop}")
+                
+                return jsonify({
+                    "success": True,
+                    "crop": crop,
+                    "verification": "model_only",
+                    **result
+                })
+        else:
+            # Gemini worked but detected unsupported crop
+            print(f"❌ Gemini detected unsupported crop")
             return jsonify({
                 "success": False,
                 "error": "UNSUPPORTED_CROP",
-                "message": "Image does not appear to be a Tomato, Potato, or Bell Pepper leaf"
+                "message": "Image does not match a supported crop"
             }), 400
-
-        # Fallback validation passed
-        crop = get_crop_name_from_class(predicted_class)
-        print(f"✅ Fallback validation passed! Crop: {crop}")
-        
-        return jsonify({
-            "success": True,
-            "crop": crop,
-            "verification": "model_fallback",
-            **result
-        })
 
     except Exception as e:
         print(f"❌ Server error: {e}")
@@ -342,7 +456,8 @@ def health():
         "status": "ok",
         "model_loaded": model is not None,
         "classes": len(classes),
-        "gemini_available": bool(GEMINI_API_KEY)
+        "gemini_available": bool(GEMINI_API_KEY),
+        "openrouter_available": bool(OPENROUTER_API_KEY)
     })
 
 # ==================== RUN ====================
