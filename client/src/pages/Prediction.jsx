@@ -10,46 +10,82 @@ function Prediction() {
   const [predicting, setPredicting] = useState(false);
   const [results, setResults] = useState(null);
   const [speakingText, setSpeakingText] = useState(null);
-  const [quickExplain, setQuickExplain] = useState({}); // Store quick explanations per result
-  const [loadingExplain, setLoadingExplain] = useState({}); // Loading state per result
-  const [explainLang, setExplainLang] = useState('en'); // Language for explanation
+  const [quickExplain, setQuickExplain] = useState({});
+  const [loadingExplain, setLoadingExplain] = useState({});
+  const [explainLang, setExplainLang] = useState('en');
   
-  // Disease Q&A states
-  const [diseaseChat, setDiseaseChat] = useState({}); // Chat history per disease
+  // Camera states
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [cameraFacing, setCameraFacing] = useState('environment'); // 'environment' = back, 'user' = front
+  
+  // Disease Q&A states - Improved for natural conversation
+  const [diseaseChat, setDiseaseChat] = useState({});
   const [diseaseChatInput, setDiseaseChatInput] = useState({});
   const [loadingDiseaseChat, setLoadingDiseaseChat] = useState({});
   
   const { isAuthenticated, user } = useAuth();
   const synthRef = useRef(window.speechSynthesis);
   const fileInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
 
-  // Clean text by removing emojis and special characters that cause speech issues
+  // Helper function to extract clean crop and disease names
+  const extractCropAndDisease = (className, diseaseName) => {
+    let cleanCrop = '';
+    let cleanDisease = '';
+    
+    // Handle different formats: "Tomato___Bacterial_spot" or "Tomato_Bacterial_spot"
+    if (className.includes('___')) {
+      const parts = className.split('___');
+      cleanCrop = parts[0];
+      cleanDisease = parts[1];
+    } else if (className.includes('_')) {
+      const parts = className.split('_');
+      cleanCrop = parts[0];
+      cleanDisease = parts.slice(1).join('_');
+    } else {
+      cleanCrop = className;
+      cleanDisease = diseaseName.replace(/\s+/g, '_');
+    }
+    
+    // Remove "healthy" if present
+    if (cleanDisease.toLowerCase().includes('healthy')) {
+      cleanDisease = 'healthy';
+    }
+    
+    return {
+      crop: cleanCrop,
+      disease: cleanDisease,
+      displayCrop: cleanCrop,
+      displayDisease: cleanDisease.replace(/_/g, ' ')
+    };
+  };
+
   const cleanTextForSpeech = (text) => {
     if (!text) return '';
-    // Remove emojis and other non-standard characters while keeping essential punctuation
     return text
-      .replace(/[\u{1F600}-\u{1F64F}]/gu, '') // Emoticons
-      .replace(/[\u{1F300}-\u{1F5FF}]/gu, '') // Symbols & pictographs
-      .replace(/[\u{1F680}-\u{1F6FF}]/gu, '') // Transport & map symbols
-      .replace(/[\u{1F700}-\u{1F77F}]/gu, '') // Alchemical symbols
-      .replace(/[\u{1F780}-\u{1F7FF}]/gu, '') // Geometric shapes
-      .replace(/[\u{1F800}-\u{1F8FF}]/gu, '') // Supplemental arrows
-      .replace(/[\u{1F900}-\u{1F9FF}]/gu, '') // Supplemental symbols
-      .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '') // Chess symbols
-      .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '') // Symbols and pictographs extended
-      .replace(/[\u{2600}-\u{26FF}]/gu, '') // Miscellaneous symbols
-      .replace(/[\u{2700}-\u{27BF}]/gu, '') // Dingbats
-      .replace(/_/g, ' ') // Replace underscores with spaces (Tomato_Bacterial_spot -> Tomato Bacterial spot)
-      .replace(/\.(?=[A-Z])/g, ' ') // Replace periods before capitals with spaces (Tomato.Spot -> Tomato Spot)
-      .replace(/\*\*/g, '') // Remove markdown bold
-      .replace(/\*/g, '') // Remove markdown italics
-      .replace(/#{1,6}\s/g, '') // Remove headers
-      .replace(/\d+\.\s/g, ' ') // Remove numbered lists
-      .replace(/-\s/g, ' ') // Remove bullet lists
-      .replace(/\s+\(/g, '(') // Remove extra spaces before parenthesis
-      .replace(/[^\w\s.,!?;:()\n]/g, ' ') // Keep only word chars, spaces, and basic punctuation
-      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .replace(/[\u{1F600}-\u{1F64F}]/gu, '')
+      .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
+      .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')
+      .replace(/[\u{1F700}-\u{1F77F}]/gu, '')
+      .replace(/[\u{1F780}-\u{1F7FF}]/gu, '')
+      .replace(/[\u{1F800}-\u{1F8FF}]/gu, '')
+      .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')
+      .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')
+      .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')
+      .replace(/[\u{2600}-\u{26FF}]/gu, '')
+      .replace(/[\u{2700}-\u{27BF}]/gu, '')
+      .replace(/_/g, ' ')
+      .replace(/\.(?=[A-Z])/g, ' ')
+      .replace(/\*\*/g, '')
+      .replace(/\*/g, '')
+      .replace(/#{1,6}\s/g, '')
+      .replace(/\d+\.\s/g, ' ')
+      .replace(/-\s/g, ' ')
+      .replace(/\s+\(/g, '(')
+      .replace(/[^\w\s.,!?;:()\n]/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
   };
 
@@ -58,10 +94,13 @@ function Prediction() {
       if (synthRef.current) {
         synthRef.current.cancel();
       }
+      // Stop camera stream when component unmounts
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
     };
-  }, []);
+  }, [cameraStream]);
 
-  // Process images from files (browse or capture)
   const processImageFiles = (files) => {
     const filesArray = Array.from(files);
     
@@ -75,7 +114,7 @@ function Prediction() {
         toast.error(`${file.name} is not an image`);
         return false;
       }
-      if (file.size > 5 * 1024 * 1024) { // Strict 5MB checking
+      if (file.size > 5 * 1024 * 1024) {
         toast.error(`Image exceeds the maximum 5MB size limit.`);
         return false;
       }
@@ -84,52 +123,130 @@ function Prediction() {
     
     if (validFiles.length === 0) return;
     
-    setImages(validFiles); // Override, do not push
+    setImages(validFiles);
     const newPreviews = validFiles.map(file => URL.createObjectURL(file));
-    setPreviews(newPreviews); // Override, do not push
+    setPreviews(newPreviews);
     setResults(null);
     setQuickExplain({});
+    setShowCamera(false); // Close camera if open
   };
 
   const handleImageChange = (e) => {
     processImageFiles(e.target.files);
-    // Reset file input value to allow selecting same file again
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Handle camera capture
-  const handleCameraCapture = async () => {
+  // Start back camera
+  const startBackCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (cameraInputRef.current) {
-        cameraInputRef.current.srcObject = stream;
-        cameraInputRef.current.style.display = 'block';
-        // Create a temporary video element for capture
-        const video = document.createElement('video');
-        video.srcObject = stream;
-        video.setAttribute('playsinline', 'true');
-        await video.play();
-        
-        // Create canvas to capture frame
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const context = canvas.getContext('2d');
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        // Convert canvas to file
-        canvas.toBlob((blob) => {
-          const file = new File([blob], `camera-capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-          processImageFiles([file]);
-          // Stop all tracks
-          stream.getTracks().forEach(track => track.stop());
-          if (cameraInputRef.current) cameraInputRef.current.style.display = 'none';
-        }, 'image/jpeg', 0.9);
+      // Stop any existing stream
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
       }
+      
+      // Request back camera (environment facing)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: 'environment' } }
+      });
+      
+      setCameraStream(stream);
+      setCameraFacing('environment');
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+      
+      setShowCamera(true);
     } catch (error) {
-      console.error('Camera error:', error);
-      toast.error('Unable to access camera. Please check permissions.');
+      console.error('Back camera error:', error);
+      // Fallback: try default camera if back camera fails
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        setCameraStream(stream);
+        setCameraFacing('default');
+        
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+        
+        setShowCamera(true);
+        toast.success('Using default camera');
+      } catch (fallbackError) {
+        console.error('Fallback camera error:', fallbackError);
+        toast.error('Unable to access camera. Please check permissions.');
+      }
     }
+  };
+
+  // Switch camera between front and back
+  const switchCamera = async () => {
+    const newFacingMode = cameraFacing === 'environment' ? 'user' : 'environment';
+    
+    try {
+      // Stop current stream
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Request new camera
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: newFacingMode } }
+      });
+      
+      setCameraStream(stream);
+      setCameraFacing(newFacingMode);
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+      
+      toast.success(newFacingMode === 'environment' ? 'Back camera activated' : 'Front camera activated');
+    } catch (error) {
+      console.error('Camera switch error:', error);
+      toast.error('Cannot switch camera');
+    }
+  };
+
+  // Capture photo from camera
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      
+      // Set canvas dimensions to match video
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      // Draw video frame to canvas
+      const context = canvas.getContext('2d');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Convert canvas to blob
+      canvas.toBlob((blob) => {
+        const file = new File([blob], `camera-capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        processImageFiles([file]);
+        
+        // Stop camera and close modal
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          setCameraStream(null);
+        }
+        setShowCamera(false);
+        toast.success('Photo captured successfully!');
+      }, 'image/jpeg', 0.9);
+    }
+  };
+
+  // Close camera
+  const closeCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setShowCamera(false);
   };
 
   const handlePredict = async () => {
@@ -170,14 +287,12 @@ function Prediction() {
     }
   };
 
-  // Professional speak function with text cleaning
   const speakText = (text, id, lang = 'en-US') => {
     if (!synthRef.current) {
       toast.error('Text-to-speech not supported');
       return;
     }
     
-    // Cancel any ongoing speech
     synthRef.current.cancel();
     
     if (speakingText === id) {
@@ -185,7 +300,6 @@ function Prediction() {
       return;
     }
     
-    // Clean the text before speaking
     const cleanText = cleanTextForSpeech(text);
     if (!cleanText.trim()) {
       toast.error('No readable text to speak');
@@ -194,7 +308,7 @@ function Prediction() {
     
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.lang = lang;
-    utterance.rate = lang === 'hi-IN' ? 0.8 : 0.85; // Slower for natural speech
+    utterance.rate = lang === 'hi-IN' ? 0.8 : 0.85;
     utterance.pitch = lang === 'hi-IN' ? 1.1 : 1;
     utterance.volume = 1;
     
@@ -210,15 +324,17 @@ function Prediction() {
   };
 
   const getQuickExplanation = async (result, language) => {
-    const key = `${result.className}_${language}`;
+    const { crop, disease } = extractCropAndDisease(result.className, result.diseaseName);
+    const key = `${crop}_${disease}_${language}`;
+    
     if (quickExplain[key]) return;
     
     setLoadingExplain(prev => ({ ...prev, [key]: true }));
     
     try {
       const response = await API.post('/chatbot/quick-explain', {
-        diseaseName: result.diseaseName,
-        cropName: result.className, // Use crop name from detection
+        diseaseName: disease,
+        cropName: crop,
         symptoms: result.symptoms,
         treatment: result.treatment,
         prevention: result.prevention,
@@ -229,9 +345,14 @@ function Prediction() {
       
       if (response.data.success) {
         setQuickExplain(prev => ({ ...prev, [key]: response.data.reply }));
-        // Initialize disease chat for Q&A
-        initializeDiseaseChat(result.diseaseName, result.className);
-        // Auto-play speech
+        // Initialize chat with proper context
+        const chatKey = `${crop}_${disease}_chat`;
+        if (!diseaseChat[chatKey]) {
+          setDiseaseChat(prev => ({
+            ...prev,
+            [chatKey]: []
+          }));
+        }
         setTimeout(() => {
           speakQuickExplain(response.data.reply, `quick-${key}`, language);
         }, 100);
@@ -240,64 +361,61 @@ function Prediction() {
       }
     } catch (error) {
       console.error('Quick explain error:', error);
-      // Clean disease name for readable display
-      const cleanDiseaseName = result.diseaseName.replace(/_/g, ' ').replace(/\./g, ' ');
+      const { displayDisease } = extractCropAndDisease(result.className, result.diseaseName);
       const fallback = language === 'hi' 
-        ? `आपकी ${result.className || 'फसल'} में ${cleanDiseaseName} की समस्या आ गई है। नमी और गर्मी इसका कारण हो सकते हैं। घबराइए मत, सही इलाज से 1-2 हफ्ते में ठीक हो जाएगी। बाजार में मिलने वाली दवा का इस्तेमाल करें और नियमित निगरानी रखें।`
-        : `Your ${result.className || 'crop'} has ${cleanDiseaseName}. Humidity and warmth usually cause this problem. Don't worry - proper treatment will fix it in 1-2 weeks. Use available market treatments and monitor your plants regularly.`;
+        ? `आपकी ${crop} फसल में ${displayDisease} की समस्या आ गई है। नमी और गर्मी इसका कारण हो सकते हैं। घबराइए मत, सही इलाज से 1-2 हफ्ते में ठीक हो जाएगी। बाजार में मिलने वाली दवा का इस्तेमाल करें और नियमित निगरानी रखें।`
+        : `Your ${crop} crop has ${displayDisease}. Humidity and warmth usually cause this problem. Don't worry - proper treatment will fix it in 1-2 weeks. Use available market treatments and monitor your plants regularly.`;
       setQuickExplain(prev => ({ ...prev, [key]: fallback }));
-      initializeDiseaseChat(result.diseaseName, result.className);
     } finally {
       setLoadingExplain(prev => ({ ...prev, [key]: false }));
     }
   };
 
-  // Initialize disease Q&A chat
-  const initializeDiseaseChat = (diseaseName, cropName) => {
-    const chatKey = `${diseaseName}_chat`;
-    if (!diseaseChat[chatKey]) {
-      setDiseaseChat(prev => ({
-        ...prev,
-        [chatKey]: [{ role: 'system', msg: `Asking about ${diseaseName} on ${cropName}? Ask away! हिंदी या English में सवाल पूछें।` }]
-      }));
-    }
-  };
-
-  // Ask disease question
-  const askDiseaseQuestion = async (result, inputKey, language) => {
-    const question = diseaseChatInput[inputKey]?.trim();
-    if (!question) return;
+  // NEW: Natural conversation handler for any disease question
+  const askNaturalQuestion = async (result, question, language) => {
+    const { crop, disease, displayDisease } = extractCropAndDisease(result.className, result.diseaseName);
+    const chatKey = `${crop}_${disease}_chat`;
     
-    const chatKey = `${result.diseaseName}_chat`;
+    if (!question.trim()) return;
+    
     setLoadingDiseaseChat(prev => ({ ...prev, [chatKey]: true }));
-    setDiseaseChatInput(prev => ({ ...prev, [inputKey]: '' }));
     
     // Add user message to chat
     setDiseaseChat(prev => ({
       ...prev,
-      [chatKey]: [...(prev[chatKey] || []), { role: 'user', msg: question }]
+      [chatKey]: [...(prev[chatKey] || []), { 
+        role: 'user', 
+        msg: question,
+        timestamp: Date.now()
+      }]
     }));
     
     try {
+      // Send to backend for natural AI response
       const response = await API.post('/chatbot/disease-qa', {
-        diseaseName: result.diseaseName,
-        cropName: result.className,
+        diseaseName: disease,
+        cropName: crop,
         question: question,
-        language: language
+        language: language,
+        context: diseaseChat[chatKey] || [] // Send chat history for context
       });
       
       if (response.data.success) {
         setDiseaseChat(prev => ({
           ...prev,
-          [chatKey]: [...prev[chatKey], { role: 'assistant', msg: response.data.reply }]
+          [chatKey]: [...prev[chatKey], { 
+            role: 'assistant', 
+            msg: response.data.reply,
+            timestamp: Date.now()
+          }]
         }));
+      } else {
+        throw new Error('Failed to get response');
       }
     } catch (error) {
       console.error('Disease QA error:', error);
-      setDiseaseChat(prev => ({
-        ...prev,
-        [chatKey]: [...prev[chatKey], { role: 'assistant', msg: language === 'hi' ? 'कृपया फिर से कोशिश करें।' : 'Please try again.' }]
-      }));
+      // Show error but don't add dummy response
+      toast.error(language === 'hi' ? 'जवाब लाने में समस्या हुई। कृपया फिर से कोशिश करें।' : 'Failed to get answer. Please try again.');
     } finally {
       setLoadingDiseaseChat(prev => ({ ...prev, [chatKey]: false }));
     }
@@ -318,8 +436,8 @@ function Prediction() {
     
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.lang = language === 'hi' ? 'hi-IN' : 'en-US';
-    utterance.rate = language === 'hi' ? 0.8 : 0.85; // Slower, more natural speed
-    utterance.pitch = language === 'hi' ? 1.1 : 1; // Slightly higher pitch for Hindi
+    utterance.rate = language === 'hi' ? 0.8 : 0.85;
+    utterance.pitch = language === 'hi' ? 1.1 : 1;
     utterance.volume = 1;
     
     utterance.onstart = () => setSpeakingText(id);
@@ -332,7 +450,6 @@ function Prediction() {
     synthRef.current.speak(utterance);
   };
 
-  // Remove an image from the list
   const removeImage = (index) => {
     setImages(prev => prev.filter((_, i) => i !== index));
     URL.revokeObjectURL(previews[index]);
@@ -347,12 +464,11 @@ function Prediction() {
       background: 'linear-gradient(135deg, #f5f7fa 0%, #e8f0e8 100%)',
       padding: '40px 20px'
     }}>
-      {/* Hidden video element for camera capture */}
-      <video ref={cameraInputRef} style={{ display: 'none', position: 'fixed', bottom: 0, right: 0, width: '200px' }} autoPlay playsInline />
+      {/* Hidden canvas for capturing photo */}
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
       
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         
-        {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '30px' }}>
           <h1 style={{
             fontSize: 'clamp(1.8rem, 4vw, 2.5rem)',
@@ -371,24 +487,6 @@ function Prediction() {
           </p>
         </div>
 
-        {/* Auth Status */}
-
-        
-        {/* <div style={{
-          background: isAuthenticated ? '#dcfce7' : '#fef3c7',
-          padding: '12px 20px',
-          borderRadius: '12px',
-          marginBottom: '30px',
-          textAlign: 'center'
-        }}>
-          {isAuthenticated ? (
-            <span>✅ Logged in as <strong>{user?.name}</strong> - Your predictions will be saved!</span>
-          ) : (
-            <span>⚠️ Not logged in. <a href="/login" style={{ color: '#2c5f2d' }}>Login</a> to save history.</span>
-          )}
-        </div> */}
-
-        {/* Upload Area with Browse and Capture options */}
         <div style={{
           background: 'white',
           borderRadius: '20px',
@@ -397,7 +495,6 @@ function Prediction() {
           border: '2px dashed #cbd5e1'
         }}>
           <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', flexWrap: 'wrap' }}>
-            {/* Browse Files Button */}
             <div>
               <input
                 type="file"
@@ -422,9 +519,8 @@ function Prediction() {
               </label>
             </div>
             
-            {/* Capture from Camera Button */}
             <button
-              onClick={handleCameraCapture}
+              onClick={startBackCamera}
               style={{
                 padding: '14px 32px',
                 background: '#4a90e2',
@@ -445,7 +541,6 @@ function Prediction() {
             Supported: JPEG, PNG, GIF | Max 5MB | Only 1 image allowed
           </p>
           
-          {/* Image Previews with Remove Option */}
           {previews.length > 0 && (
             <div style={{ marginTop: '30px' }}>
               <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -510,8 +605,122 @@ function Prediction() {
 
         {predicting && <Loader />}
 
+        {/* Camera Modal - Back Camera View */}
+        {showCamera && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'black',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <div style={{
+              position: 'relative',
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  maxHeight: '80vh',
+                  objectFit: 'cover',
+                  transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'none'
+                }}
+              />
+              
+              {/* Camera Controls */}
+              <div style={{
+                position: 'absolute',
+                bottom: 30,
+                left: 0,
+                right: 0,
+                display: 'flex',
+                justifyContent: 'center',
+                gap: 20,
+                padding: 20,
+                background: 'rgba(0,0,0,0.7)'
+              }}>
+                <button
+                  onClick={switchCamera}
+                  style={{
+                    padding: '15px 25px',
+                    background: '#4a90e2',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  🔄 Switch Camera
+                </button>
+                
+                <button
+                  onClick={capturePhoto}
+                  style={{
+                    padding: '15px 35px',
+                    background: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50px',
+                    cursor: 'pointer',
+                    fontSize: '18px',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  📸 Capture
+                </button>
+                
+                <button
+                  onClick={closeCamera}
+                  style={{
+                    padding: '15px 25px',
+                    background: '#ef4444',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  ❌ Close
+                </button>
+              </div>
+              
+              <div style={{
+                position: 'absolute',
+                top: 20,
+                left: 0,
+                right: 0,
+                textAlign: 'center',
+                color: 'white',
+                background: 'rgba(0,0,0,0.5)',
+                padding: '10px',
+                fontSize: '14px'
+              }}>
+                {cameraFacing === 'environment' ? '📷 Back Camera Active' : '🤳 Front Camera Active'}
+              </div>
+            </div>
+          </div>
+        )}
 
-        {/* Results Section */}
+        {/* Results Section with Natural Q&A */}
         {results && results.results && (
           <div style={{ marginTop: '40px' }}>
             <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>
@@ -520,9 +729,10 @@ function Prediction() {
             
             {results.results.map((result, idx) => {
               const isHealthy = result.isHealthy;
-              const resultId = `result-${idx}`;
-              const engKey = `${result.className}_en`;
-              const hinKey = `${result.className}_hi`;
+              const { crop, disease, displayCrop, displayDisease } = extractCropAndDisease(result.className, result.diseaseName);
+              const chatKey = `${crop}_${disease}_chat`;
+              const engKey = `${crop}_${disease}_en`;
+              const hinKey = `${crop}_${disease}_hi`;
               
               return (
                 <div key={idx} style={{
@@ -532,7 +742,6 @@ function Prediction() {
                   overflow: 'hidden',
                   boxShadow: '0 4px 15px rgba(0,0,0,0.1)'
                 }}>
-                  {/* Header */}
                   <div style={{
                     background: isHealthy ? '#10b981' : '#ef4444',
                     padding: '15px 20px',
@@ -545,30 +754,14 @@ function Prediction() {
                   }}>
                     <div>
                       <h3 style={{ margin: 0, fontSize: '18px' }}>
-                        Image {idx + 1}: {result.diseaseName}
+                        Image {idx + 1}: {displayDisease}
                       </h3>
                       <p style={{ margin: '5px 0 0', fontSize: '12px', opacity: 0.9 }}>
-                        Confidence: {result.confidence}%
+                        Crop: {displayCrop} | Confidence: {result.confidence}%
                       </p>
                     </div>
-                    {/* <button
-                      onClick={() => speakText(result.aiExplanation || result.treatment, resultId)}
-                      style={{
-                        background: 'rgba(255,255,255,0.2)',
-                        border: 'none',
-                        color: 'white',
-                        width: '40px',
-                        height: '40px',
-                        borderRadius: '50%',
-                        cursor: 'pointer',
-                        fontSize: '18px'
-                      }}
-                    >
-                      {speakingText === resultId ? '🔊' : '🔈'}
-                    </button> */}
                   </div>
 
-                  {/* AI Summary - From Gemini API */}
                   <div style={{
                     background: '#f0fdf4',
                     padding: '20px',
@@ -582,7 +775,6 @@ function Prediction() {
                       : 'Disease detected. Please follow the treatment below.')}
                   </div>
 
-                  {/* Quick Explain Buttons */}
                   <div style={{
                     padding: '15px 20px',
                     background: '#fef3c7',
@@ -594,7 +786,7 @@ function Prediction() {
                     justifyContent: 'space-between'
                   }}>
                     <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#92400e' }}>
-                      ⚡ Get Simple & Farmer-Friendly Explanation:
+                      ⚡ Get Simple Explanation:
                     </span>
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button
@@ -640,7 +832,6 @@ function Prediction() {
                     </div>
                   </div>
 
-                  {/* Quick Explanation Display */}
                   {(quickExplain[engKey] || quickExplain[hinKey]) && (
                     <div style={{
                       padding: '20px',
@@ -649,7 +840,7 @@ function Prediction() {
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                         <span style={{ fontWeight: 'bold', color: '#1e40af', fontSize: '14px' }}>
-                          {quickExplain[engKey] ? '� Farmer-Friendly Guidance (English)' : '💚 किसान के लिए सहायक मार्गदर्शन (हिंदी)'}
+                          {quickExplain[engKey] ? '💚 Farmer Guidance (English)' : '💚 किसान के लिए सहायक मार्गदर्शन (हिंदी)'}
                         </span>
                         {(quickExplain[engKey] || quickExplain[hinKey]) && (
                           <button
@@ -684,7 +875,6 @@ function Prediction() {
                     </div>
                   )}
 
-                  {/* Loading indicator for quick explain */}
                   {(loadingExplain[engKey] || loadingExplain[hinKey]) && (
                     <div style={{
                       padding: '20px',
@@ -708,7 +898,7 @@ function Prediction() {
                     </div>
                   )}
 
-                  {/* Disease Q&A Chat */}
+                  {/* NATURAL Q&A SECTION */}
                   {(quickExplain[engKey] || quickExplain[hinKey]) && (
                     <div style={{
                       padding: '15px 20px',
@@ -716,71 +906,139 @@ function Prediction() {
                       borderBottom: '1px solid #e9d5ff',
                       borderTop: '1px solid #e5e7eb'
                     }}>
-                      <div style={{ fontWeight: 'bold', color: '#6b21a8', marginBottom: '12px', fontSize: '14px' }}>
-                        ❓ Ask Questions About {result.diseaseName}
+                      <div style={{ fontWeight: 'bold', color: '#6b21a8', marginBottom: '12px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>💬</span> Ask Anything About {displayDisease}
+                        <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#9333ea' }}>
+                          (Natural conversation)
+                        </span>
                       </div>
-                      <div style={{ maxHeight: '200px', overflowY: 'auto', background: 'white', borderRadius: '8px', padding: '12px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {diseaseChat[`${result.diseaseName}_chat`]?.map((msg, i) => (
+                      
+                      {/* Chat Messages */}
+                      <div style={{ 
+                        maxHeight: '300px', 
+                        overflowY: 'auto', 
+                        background: 'white', 
+                        borderRadius: '12px', 
+                        padding: '12px', 
+                        marginBottom: '12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px'
+                      }}>
+                        {(!diseaseChat[chatKey] || diseaseChat[chatKey].length === 0) && (
+                          <div style={{ 
+                            textAlign: 'center', 
+                            color: '#9ca3af', 
+                            fontSize: '12px',
+                            padding: '20px'
+                          }}>
+                            💡 Ask me anything about {displayDisease} - causes, symptoms, treatment, prevention, organic remedies, or any specific question!
+                          </div>
+                        )}
+                        
+                        {diseaseChat[chatKey]?.map((msg, i) => (
                           <div key={i} style={{
                             alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                             background: msg.role === 'user' ? '#6b21a8' : '#f3f0ff',
                             color: msg.role === 'user' ? 'white' : '#4b0082',
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            maxWidth: '80%',
+                            padding: '10px 14px',
+                            borderRadius: '12px',
+                            maxWidth: '85%',
                             fontSize: '13px',
-                            lineHeight: '1.4'
+                            lineHeight: '1.5',
+                            wordWrap: 'break-word'
                           }}>
                             {msg.msg}
                           </div>
                         ))}
-                        {loadingDiseaseChat[`${result.diseaseName}_chat`] && (
-                          <div style={{ alignSelf: 'flex-start', color: '#6b7280', fontSize: '12px' }}>
-                            Thinking...
+                        
+                        {loadingDiseaseChat[chatKey] && (
+                          <div style={{ alignSelf: 'flex-start', display: 'flex', gap: '6px', padding: '10px' }}>
+                            <div style={{
+                              width: '8px',
+                              height: '8px',
+                              background: '#6b21a8',
+                              borderRadius: '50%',
+                              animation: 'bounce 0.5s infinite'
+                            }} />
+                            <div style={{
+                              width: '8px',
+                              height: '8px',
+                              background: '#6b21a8',
+                              borderRadius: '50%',
+                              animation: 'bounce 0.5s infinite 0.1s'
+                            }} />
+                            <div style={{
+                              width: '8px',
+                              height: '8px',
+                              background: '#6b21a8',
+                              borderRadius: '50%',
+                              animation: 'bounce 0.5s infinite 0.2s'
+                            }} />
                           </div>
                         )}
                       </div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
+                      
+                      {/* Input Area */}
+                      <div style={{ display: 'flex', gap: '10px' }}>
                         <input
                           type="text"
-                          placeholder={explainLang === 'hi' ? 'सवाल पूछें या हिंदी में लिखें...' : 'Ask your question...'}
-                          value={diseaseChatInput[`${result.diseaseName}_input`] || ''}
-                          onChange={(e) => setDiseaseChatInput(prev => ({ ...prev, [`${result.diseaseName}_input`]: e.target.value }))}
+                          placeholder={`Ask anything about ${displayDisease}... (e.g., "What causes this?", "Best organic treatment?", "How to prevent?")`}
+                          value={diseaseChatInput[chatKey] || ''}
+                          onChange={(e) => setDiseaseChatInput(prev => ({ ...prev, [chatKey]: e.target.value }))}
                           onKeyPress={(e) => {
-                            if (e.key === 'Enter') {
-                              askDiseaseQuestion(result, `${result.diseaseName}_input`, explainLang);
+                            if (e.key === 'Enter' && !loadingDiseaseChat[chatKey]) {
+                              const question = diseaseChatInput[chatKey]?.trim();
+                              if (question) {
+                                askNaturalQuestion(result, question, explainLang);
+                                setDiseaseChatInput(prev => ({ ...prev, [chatKey]: '' }));
+                              }
                             }
                           }}
                           style={{
                             flex: 1,
-                            padding: '8px 12px',
-                            borderRadius: '20px',
+                            padding: '10px 15px',
+                            borderRadius: '25px',
                             border: '1px solid #d8b4fe',
                             outline: 'none',
-                            fontSize: '13px'
+                            fontSize: '13px',
+                            fontFamily: 'inherit'
                           }}
+                          disabled={loadingDiseaseChat[chatKey]}
                         />
                         <button
-                          onClick={() => askDiseaseQuestion(result, `${result.diseaseName}_input`, explainLang)}
-                          disabled={loadingDiseaseChat[`${result.diseaseName}_chat`]}
+                          onClick={() => {
+                            const question = diseaseChatInput[chatKey]?.trim();
+                            if (question && !loadingDiseaseChat[chatKey]) {
+                              askNaturalQuestion(result, question, explainLang);
+                              setDiseaseChatInput(prev => ({ ...prev, [chatKey]: '' }));
+                            }
+                          }}
+                          disabled={loadingDiseaseChat[chatKey] || !diseaseChatInput[chatKey]?.trim()}
                           style={{
-                            padding: '8px 16px',
-                            background: '#6b21a8',
+                            padding: '10px 20px',
+                            background: loadingDiseaseChat[chatKey] || !diseaseChatInput[chatKey]?.trim() ? '#d1d5db' : '#6b21a8',
                             color: 'white',
                             border: 'none',
-                            borderRadius: '20px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            opacity: loadingDiseaseChat[`${result.diseaseName}_chat`] ? 0.6 : 1
+                            borderRadius: '25px',
+                            cursor: loadingDiseaseChat[chatKey] || !diseaseChatInput[chatKey]?.trim() ? 'not-allowed' : 'pointer',
+                            fontSize: '13px',
+                            fontWeight: 'bold',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px'
                           }}
                         >
-                          {explainLang === 'hi' ? 'पूछें' : 'Ask'}
+                          <span>✏️</span> Ask
                         </button>
+                      </div>
+                      
+                      <div style={{ marginTop: '8px', fontSize: '11px', color: '#7e22ce', textAlign: 'center' }}>
+                        💡 You can ask in English or Hindi - Get natural, detailed answers!
                       </div>
                     </div>
                   )}
 
-                  {/* Detailed Information */}
                   <details style={{ padding: '20px', cursor: 'pointer' }}>
                     <summary style={{ fontWeight: 'bold', color: '#2c5f2d', marginBottom: '15px' }}>
                       📋 Detailed Information
@@ -796,7 +1054,6 @@ function Prediction() {
                     </div>
                   </details>
 
-                  {/* Action Buttons */}
                   <div style={{
                     padding: '15px 20px',
                     background: '#f8fafc',
@@ -820,13 +1077,13 @@ function Prediction() {
                     </button>
                     <button
                       onClick={() => {
-                        const shareText = `🌾 *FarmGuru Diagnosis Report*\n\n*Crop Disease:* ${result.diseaseName}\n*AI Confidence:* ${result.confidence}%\n\n🛡️ *Treatment Advice:*\n${result.treatment}\n\n_Analyzed via FarmGuru AI_`;
+                        const shareText = `🌾 *FarmGuru Diagnosis Report*\n\n*Crop Disease:* ${displayDisease}\n*Crop:* ${displayCrop}\n*AI Confidence:* ${result.confidence}%\n\n🛡️ *Treatment Advice:*\n${result.treatment}\n\n_Analyzed via FarmGuru AI_`;
                         const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
                         window.open(whatsappUrl, '_blank');
                       }}
                       style={{
                         padding: '8px 16px',
-                        background: '#25D366', // WhatsApp Brand Green
+                        background: '#25D366',
                         color: 'white',
                         border: 'none',
                         borderRadius: '25px',
@@ -851,6 +1108,10 @@ function Prediction() {
       <style>{`
         @keyframes spin {
           to { transform: rotate(360deg); }
+        }
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-6px); }
         }
       `}</style>
     </div>
