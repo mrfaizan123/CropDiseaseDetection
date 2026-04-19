@@ -300,7 +300,7 @@ function Dashboard() {
 
         <div className="dashboard-header">
           <div className="dashboard-title-group">
-            <h1><span>🌾</span> Master Dashboard</h1>
+            <h1><span>🌾</span> Farmer Dashboard</h1>
             <p className="dashboard-subtitle">FarmGuru Intelligence Suite | {weather?.city || 'India'}</p>
           </div>
           <div className="header-actions" style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
