@@ -632,7 +632,7 @@ export default function Home() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: "clamp(16px,2vw,24px)" }}>
             {[
               { icon: "🚀", title: "Free & Instant", desc: "No registration required for disease detection. Get results in seconds." },
-              { icon: "🎯", title: "94.5% Accuracy", desc: "Our AI model is trained on thousands of images for precise detection." },
+              { icon: "🎯", title: "90+ Accuracy", desc: "Our AI model is trained on thousands of images for precise detection." },
               { icon: "📱", title: "Mobile Friendly", desc: "Works perfectly on any device - smartphone, tablet, or computer." },
               { icon: "🌾", title: "Farmer Dashboard", desc: "Track your crop health history and get personalized insights." },
               { icon: "📊", title: "Market Prices", desc: "Real-time mandi prices to help you sell at the best rates." },
@@ -655,7 +655,7 @@ export default function Home() {
         {/* FOOTER */}
         <footer style={{ borderTop: "1px solid rgba(74,158,42,0.12)", padding: "clamp(20px,3vw,28px) clamp(24px,6vw,80px)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }} className="hw-footer">
           <div style={{ fontFamily: "'DM Serif Display',Georgia,serif", fontSize: 18, color: "#7ecb3a" }}>🌿 FarmGuru</div>
-          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "rgba(198,232,154,0.3)", letterSpacing: "0.05em" }}>© 2025 FARMGURU · CROP INTELLIGENCE PLATFORM</div>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "rgba(198,232,154,0.3)", letterSpacing: "0.05em" }}>© 2026 FARMGURU · CROP INTELLIGENCE PLATFORM</div>
         </footer>
       </div>
     </>
