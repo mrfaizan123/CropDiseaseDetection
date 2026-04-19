@@ -229,7 +229,7 @@ def validate_with_model_only(prediction_result):
     
     # Check 2: Confidence threshold
     is_confident = confidence > 20
-    print(f"  Confidence: {confidence}% {'✅ (>65%)' if is_confident else '❌ (need >65%)'}")
+    print(f"  Confidence: {confidence}% {'✅ (>20%)' if is_confident else '❌ (need >20%)'}")
     
     # Check 3: All top 3 predictions must be supported crops
     supported_in_top3 = sum(1 for item in top_3 if is_supported_crop_class(item['class'])) 
