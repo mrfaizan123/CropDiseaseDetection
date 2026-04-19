@@ -585,7 +585,7 @@ export default function Signup() {
             <div className="sg-perk"><div className="sg-picon">🔬</div><span className="sg-ptext">AI disease detection</span></div>
             <div className="sg-perk"><div className="sg-picon">📊</div><span className="sg-ptext">Scan history & analytics</span></div>
             {/* <div className="sg-perk"><div className="sg-picon">💹</div><span className="sg-ptext">Live mandi rates</span></div> */}
-            <div className="sg-perk"><div className="sg-picon">🌿</div><span className="sg-ptext">12+ crop types</span></div>
+            <div className="sg-perk"><div className="sg-picon">🌿</div><span className="sg-ptext">2+ crop types</span></div>
           </div>
     
         </div>
